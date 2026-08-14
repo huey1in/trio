@@ -5,3 +5,4 @@ dist/
 .dsh-trio/
 .DS_Store
 e2e.patch.yml
+tsconfig.tsbuildinfo

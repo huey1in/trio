@@ -10,11 +10,75 @@
 
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
+import type { Browser, BrowserContext, Page } from "playwright-core";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TrioContext, ToolRunContext, PlainToolDefinition, WebRoute } from "./lib/types.js";
 import { definePlainTool, genericCard, workspaceCwd } from "./lib/tools.js";
+import { resolveConfig, type ConfigSchema } from "./lib/config.js";
 import { urlPath, sendText, sendJson } from "./lib/http.js";
+
+/** 浏览器模块配置(行内 config 与命名 profile 共用的形状)。 */
+export interface BrowserConfig {
+  enabled?: boolean;
+  channel?: string;
+  executablePath?: string;
+  headless?: boolean;
+  userDataDir?: string;
+  profiles?: Record<string, Partial<BrowserConfig>>;
+  screenshotDir?: string;
+  downloadDir?: string;
+  liveViewPath?: string;
+  maxTextChars?: number;
+  maxLinks?: number;
+  timeoutMs?: number;
+}
+
+/** 一个命名 profile 的会话状态。 */
+interface ProfileState {
+  browser: Browser | null;
+  context: BrowserContext | null;
+  persistent: boolean;
+  pages: Map<number, Page>;
+  activeId: number | null;
+  counter: number;
+  channel?: string;
+}
+
+/** 一次页面下载的记录。 */
+interface DownloadEntry {
+  download: {
+    saveAs(path: string): Promise<void>;
+    suggestedFilename(): string;
+    url(): string;
+  };
+  suggestedFilename: string;
+  at: number;
+}
+
+/** 表单字段(selector 或 label 二选一)。 */
+interface FormField {
+  selector?: string;
+  label?: string;
+  value?: string;
+}
 
 export const name = "trio-browser";
 export const inject = ["tools"];
+
+const BROWSER_SCHEMA: ConfigSchema = {
+  enabled: { type: "boolean", optional: true },
+  channel: { type: "string" },
+  executablePath: { type: "string" },
+  headless: { type: "boolean" },
+  userDataDir: { type: "string" },
+  profiles: { type: "any" },
+  screenshotDir: { type: "string" },
+  downloadDir: { type: "string" },
+  liveViewPath: { type: "string" },
+  maxTextChars: { type: "number", min: 1 },
+  maxLinks: { type: "number", min: 1 },
+  timeoutMs: { type: "number", min: 1 },
+};
 
 const DEFAULT_CONFIG = {
   channel: "auto", // 'auto' | 'chrome' | 'msedge' | 'chromium' | '' (playwright default)
@@ -46,9 +110,9 @@ const downloadsByProfile = new Map();
 /** 已保存的表单回放:name → fields 数组。 */
 const savedForms = new Map();
 /** 最近一次 browser_form 填充的字段(供 browser_form_save 无参保存)。 */
-let lastFormFields = [];
+let lastFormFields: FormField[] = [];
 
-function profileConfig(config, name) {
+export function profileConfig(config: BrowserConfig, name: string): BrowserConfig {
   const named = config.profiles?.[name];
   if (!named || typeof named !== "object") return { ...config };
   return {
@@ -58,7 +122,7 @@ function profileConfig(config, name) {
   };
 }
 
-function getProfileState(name) {
+function getProfileState(name: string): ProfileState {
   let state = profileStates.get(name);
   if (state === undefined) {
     state = { browser: null, context: null, persistent: false, pages: new Map(), activeId: null, counter: 0 };
@@ -67,7 +131,7 @@ function getProfileState(name) {
   return state;
 }
 
-function downloadsOf(name) {
+function downloadsOf(name: string): DownloadEntry[] {
   let list = downloadsByProfile.get(name);
   if (list === undefined) {
     list = [];
@@ -76,8 +140,8 @@ function downloadsOf(name) {
   return list;
 }
 
-function attachPage(page, config) {
-  page.setDefaultTimeout(config.timeoutMs);
+function attachPage(page: Page, config: BrowserConfig): void {
+  page.setDefaultTimeout(config.timeoutMs ?? 30000);
   page.on("download", (download) => {
     const list = downloadsOf(currentProfile);
     list.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
@@ -85,7 +149,7 @@ function attachPage(page, config) {
   });
 }
 
-async function loadPlaywright() {
+async function loadPlaywright(): Promise<typeof import("playwright-core")> {
   try {
     return await import("playwright-core");
   } catch {
@@ -95,12 +159,18 @@ async function loadPlaywright() {
   }
 }
 
-async function launchProfile(name, config) {
+interface LaunchCandidate {
+  headless: boolean;
+  channel?: string;
+  executablePath?: string;
+}
+
+async function launchProfile(name: string, config: BrowserConfig): Promise<void> {
   const pw = await loadPlaywright();
   const state = getProfileState(name);
   const resolved = profileConfig(config, name);
-  const base = { headless: resolved.headless };
-  const candidates = [];
+  const base: LaunchCandidate = { headless: resolved.headless ?? true };
+  const candidates: LaunchCandidate[] = [];
   if (resolved.executablePath) {
     candidates.push({ ...base, executablePath: resolved.executablePath });
   } else if (resolved.channel && resolved.channel !== "auto") {
@@ -113,14 +183,14 @@ async function launchProfile(name, config) {
     for (const channel of order) candidates.push({ ...base, channel });
     candidates.push(base); // playwright's own bundled chromium fallback
   }
-  let lastError;
+  let lastError: unknown;
   for (const options of candidates) {
     try {
       if (resolved.userDataDir) {
         // 持久化配置文件目录:登录态(Cookie/localStorage)跨重启保留
         const context = await pw.chromium.launchPersistentContext(resolved.userDataDir, {
           ...options,
-          headless: resolved.headless,
+          headless: resolved.headless ?? true,
         });
         for (const existing of context.pages()) {
           existing.close().catch(() => {});
@@ -149,22 +219,32 @@ async function launchProfile(name, config) {
 }
 
 /** 当前 profile 状态(未启动时创建空状态)。 */
-function stateOf() {
+function stateOf(): ProfileState {
   return getProfileState(currentProfile);
 }
 
 /** 新建一个页面(当前 profile 会话未启动时先启动)。 */
-async function newPage(config) {
+async function newPage(config: BrowserConfig): Promise<Page> {
   const state = stateOf();
   const resolved = profileConfig(config, currentProfile);
   if (state.browser === null && state.context === null) await launchProfile(currentProfile, config);
-  const page = state.context !== null ? await state.context.newPage() : await state.browser.newPage();
-  attachPage(page, config);
-  return page;
+  const context = state.context;
+  const browser = state.browser;
+  if (context !== null) {
+    const page = await context.newPage();
+    attachPage(page, config);
+    return page;
+  }
+  if (browser !== null) {
+    const page = await browser.newPage();
+    attachPage(page, config);
+    return page;
+  }
+  throw new Error("dsh-trio/browser: browser session failed to start");
 }
 
 /** 返回当前活动页面(没有则新建),并保证浏览器已启动。 */
-async function getPage(config) {
+async function getPage(config: BrowserConfig): Promise<Page> {
   const state = stateOf();
   if (state.browser === null && state.context === null) await launchProfile(currentProfile, config);
   if (state.pages.size === 0) {
@@ -173,13 +253,15 @@ async function getPage(config) {
     state.pages.set(id, page);
     state.activeId = id;
   }
-  return state.pages.get(state.activeId);
+  const page = state.pages.get(state.activeId ?? -1);
+  if (page === undefined) throw new Error("dsh-trio/browser: no active page");
+  return page;
 }
 
 /** 活动页面(可能为 null,不触发启动)。 */
-function activePage() {
+function activePage(): Page | null {
   const state = stateOf();
-  return state.pages.get(state.activeId) ?? null;
+  return state.pages.get(state.activeId ?? -1) ?? null;
 }
 
 /** 投影当前 profile 的标签列表。 */
@@ -198,7 +280,7 @@ async function tabList() {
   return tabs;
 }
 
-async function closeBrowser() {
+async function closeBrowser(): Promise<void> {
   for (const [name, state] of profileStates) {
     const { browser, context } = state;
     state.browser = null;
@@ -222,7 +304,7 @@ async function closeBrowser() {
 }
 
 /** Best-effort current page identity, safe when nothing is open. */
-async function pageIdentity(page) {
+async function pageIdentity(page: Page) {
   try {
     return {
       url: page.url(),
@@ -237,7 +319,7 @@ async function pageIdentity(page) {
 // 工具实现
 // ---------------------------------------------------------------------------
 
-async function openTool(config, args) {
+async function openTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   await page.goto(String(args.url), {
     waitUntil: args.waitUntil ?? "domcontentloaded",
@@ -250,7 +332,7 @@ async function openTool(config, args) {
   };
 }
 
-async function snapshotTool(config, args) {
+async function snapshotTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const maxText = args.maxTextChars ?? config.maxTextChars;
   const maxLinks = args.maxLinks ?? config.maxLinks;
@@ -275,7 +357,7 @@ async function snapshotTool(config, args) {
   };
 }
 
-async function clickTool(config, args) {
+async function clickTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const selector = String(args.selector);
   await page.click(selector, { timeout: args.timeoutMs ?? config.timeoutMs });
@@ -286,7 +368,7 @@ async function clickTool(config, args) {
   };
 }
 
-async function typeTool(config, args) {
+async function typeTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const selector = String(args.selector);
   const text = String(args.text ?? "");
@@ -305,7 +387,7 @@ async function typeTool(config, args) {
   };
 }
 
-async function pressTool(config, args) {
+async function pressTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const key = String(args.key);
   if (args.selector) {
@@ -318,7 +400,7 @@ async function pressTool(config, args) {
   return { pressed: key, ...(await pageIdentity(page)) };
 }
 
-async function evalTool(config, args) {
+async function evalTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const script = String(args.script ?? "");
   // 表达式优先;含语句(换行/分号/return)时包成 async IIFE。
@@ -329,12 +411,11 @@ async function evalTool(config, args) {
   return { result };
 }
 
-async function screenshotTool(config, args, exec) {
+async function screenshotTool(config: BrowserConfig, args: Record<string, any>, exec: ToolRunContext) {
   const page = await getPage(config);
   const cwd = workspaceCwd(exec);
-  const dir = isAbsolute(config.screenshotDir)
-    ? config.screenshotDir
-    : resolve(cwd, config.screenshotDir);
+  const screenshotDir = config.screenshotDir ?? ".dsh-trio/screenshots";
+  const dir = isAbsolute(screenshotDir) ? screenshotDir : resolve(cwd, screenshotDir);
   mkdirSync(dir, { recursive: true });
   const safeName = String(args.name ?? `shot-${Date.now()}`).replace(
     /[^A-Za-z0-9._-]/g,
@@ -353,20 +434,20 @@ async function screenshotTool(config, args, exec) {
   };
 }
 
-async function waitTool(config, args) {
+async function waitTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const ms = Math.max(0, Math.min(Number(args.ms ?? 1000) || 0, 60000));
   await page.waitForTimeout(ms);
   return { waitedMs: ms, ...(await pageIdentity(page)) };
 }
 
-async function backTool(config) {
+async function backTool(config: BrowserConfig) {
   const page = await getPage(config);
   await page.goBack().catch(() => {});
   return { ...(await pageIdentity(page)) };
 }
 
-async function reloadTool(config) {
+async function reloadTool(config: BrowserConfig) {
   const page = await getPage(config);
   await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
   return { ...(await pageIdentity(page)) };
@@ -398,7 +479,7 @@ async function statusTool() {
   };
 }
 
-async function tabsTool(config, args) {
+async function tabsTool(config: BrowserConfig, args: Record<string, any>) {
   const action = args.action ?? "list";
   const state = stateOf();
   if (state.browser === null && state.context === null && action !== "list") await launchProfile(currentProfile, config);
@@ -433,7 +514,8 @@ async function tabsTool(config, args) {
       await page.close().catch(() => {});
       state.pages.delete(id);
       if (state.activeId === id) {
-        state.activeId = state.pages.size > 0 ? state.pages.keys().next().value : null;
+        const next = state.pages.keys().next().value;
+        state.activeId = next === undefined ? null : next;
       }
       return { action, activeId: state.activeId ?? -1, tabs: await tabList() };
     }
@@ -442,7 +524,7 @@ async function tabsTool(config, args) {
   }
 }
 
-function resolveTabId(args) {
+function resolveTabId(args: Record<string, any>): number {
   const state = stateOf();
   if (args.id !== undefined) return Number(args.id);
   if (args.index !== undefined) {
@@ -455,7 +537,7 @@ function resolveTabId(args) {
   throw new Error("no tab id/index given and no active tab");
 }
 
-async function downloadTool(config, args, exec) {
+async function downloadTool(config: BrowserConfig, args: Record<string, any>, exec: ToolRunContext) {
   const recentDownloads = downloadsOf(currentProfile);
   if (recentDownloads.length === 0) {
     throw new Error("no recent downloads. Trigger a download in the page first (e.g. browser_click on a download link).");
@@ -464,12 +546,12 @@ async function downloadTool(config, args, exec) {
   const entry = recentDownloads[index];
   if (entry === undefined) throw new Error(`no download at index ${index}`);
   const cwd = workspaceCwd(exec);
-  const dir = isAbsolute(config.downloadDir ?? ".dsh-trio/downloads")
-    ? config.downloadDir
-    : resolve(cwd, config.downloadDir ?? ".dsh-trio/downloads");
+  const downloadDir = config.downloadDir ?? ".dsh-trio/downloads";
+  const dir = isAbsolute(downloadDir) ? downloadDir : resolve(cwd, downloadDir);
   mkdirSync(dir, { recursive: true });
   const safe = String(entry.suggestedFilename || `download-${Date.now()}`).replace(/[\\/:*?"<>|]/g, "_");
   const filePath = join(dir, safe);
+  if (!filePath.startsWith(resolve(dir))) throw new Error(`download path escapes directory: ${filePath}`);
   await entry.download.saveAs(filePath);
   return {
     path: filePath,
@@ -479,7 +561,7 @@ async function downloadTool(config, args, exec) {
   };
 }
 
-async function uploadTool(config, args, exec) {
+async function uploadTool(config: BrowserConfig, args: Record<string, any>, exec: ToolRunContext) {
   const page = await getPage(config);
   const cwd = workspaceCwd(exec);
   const filePath = isAbsolute(args.path) ? String(args.path) : resolve(cwd, String(args.path));
@@ -490,7 +572,8 @@ async function uploadTool(config, args, exec) {
     throw new Error(`file not found: ${filePath}`);
   }
   if (!stat.isFile()) throw new Error(`not a file: ${filePath}`);
-  await page.setInputFiles(String(args.selector), filePath, {
+  const resolvedPath = resolve(filePath);
+  await page.setInputFiles(String(args.selector), resolvedPath, {
     timeout: args.timeoutMs ?? config.timeoutMs,
   });
   return {
@@ -500,7 +583,7 @@ async function uploadTool(config, args, exec) {
   };
 }
 
-async function cookiesTool(config, args) {
+async function cookiesTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const context = page.context();
   const action = args.action ?? "list";
@@ -533,7 +616,7 @@ async function cookiesTool(config, args) {
   throw new Error(`unknown cookies action: ${action}`);
 }
 
-async function formTool(config, args) {
+async function formTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   let fields = args.fields ?? [];
   if (!Array.isArray(fields) || fields.length === 0) {
@@ -557,7 +640,7 @@ async function formTool(config, args) {
       throw new Error("each field needs a selector or a label");
     }
   }
-  lastFormFields = fields.map((f) => ({ ...f }));
+  lastFormFields = fields.map((f: FormField) => ({ ...f }));
   if (args.submit === true) await page.keyboard.press("Enter");
   return {
     filled,
@@ -566,8 +649,8 @@ async function formTool(config, args) {
   };
 }
 
-async function formSaveTool(args) {
-  let fields = args.fields;
+async function formSaveTool(args: Record<string, any>) {
+  let fields: FormField[] = args.fields;
   if (!Array.isArray(fields) || fields.length === 0) {
     if (lastFormFields.length === 0) {
       throw new Error("no fields given and no previous browser_form to remember");
@@ -576,11 +659,11 @@ async function formSaveTool(args) {
   }
   const name = String(args.name ?? "");
   if (!name) throw new Error("name is required");
-  savedForms.set(name, fields.map((f) => ({ ...f })));
+  savedForms.set(name, fields.map((f: FormField) => ({ ...f })));
   return { saved: name, fields: fields.length };
 }
 
-async function formsTool(args) {
+async function formsTool(args: Record<string, any>) {
   const action = args.action ?? "list";
   if (action === "list") {
     return {
@@ -589,7 +672,7 @@ async function formsTool(args) {
         fields: fields.length,
         preview: fields
           .slice(0, 3)
-          .map((f) => f.selector ?? f.label ?? "?")
+          .map((f: FormField) => f.selector ?? f.label ?? "?")
           .join(", "),
       })),
     };
@@ -602,7 +685,7 @@ async function formsTool(args) {
   throw new Error(`unknown forms action: ${action}`);
 }
 
-async function profileTool(config, args) {
+async function profileTool(config: BrowserConfig, args: Record<string, any>) {
   const action = args.action ?? "list";
   const available = Object.keys(config.profiles ?? {});
   if (action === "list") {
@@ -631,30 +714,33 @@ async function profileTool(config, args) {
   throw new Error(`unknown profile action: ${action}`);
 }
 
-async function elementsTool(config, args) {
+async function elementsTool(config: BrowserConfig, args: Record<string, any>) {
   const page = await getPage(config);
   const max = Math.min(Math.max(Number(args.max ?? 60) || 60, 1), 200);
-  const elements = await page.evaluate((maxN) => {
-    const out = [];
-    const seen = new Set();
-    for (const el of document.querySelectorAll("input, textarea, select, button, a[href]")) {
+  const elements = await page.evaluate((maxN: number) => {
+    const out: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    const nodes = Array.from(
+      document.querySelectorAll("input, textarea, select, button, a[href]"),
+    ) as HTMLElement[];
+    for (const el of nodes) {
       if (out.length >= maxN) break;
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) continue;
       const info = {
         tag: el.tagName.toLowerCase(),
-        type: el.type ?? "",
-        name: el.name ?? "",
+        type: (el as HTMLInputElement).type ?? "",
+        name: (el as HTMLInputElement).name ?? "",
         id: el.id ?? "",
-        placeholder: el.placeholder ?? "",
+        placeholder: (el as HTMLInputElement).placeholder ?? "",
         ariaLabel: el.getAttribute("aria-label") ?? "",
         text: (el.innerText || el.textContent || "").trim().slice(0, 80),
-        href: el.href ?? "",
+        href: (el as HTMLAnchorElement).href ?? "",
         selector:
           el.id !== ""
             ? `#${CSS.escape(el.id)}`
-            : el.name !== ""
-              ? `${el.tagName.toLowerCase()}[name="${el.name}"]`
+            : (el as HTMLInputElement).name !== ""
+              ? `${el.tagName.toLowerCase()}[name="${(el as HTMLInputElement).name}"]`
               : "",
       };
       const key = `${info.tag}|${info.name}|${info.id}|${info.placeholder}|${info.text}`;
@@ -676,9 +762,11 @@ async function closeTool() {
 // 插件
 // ---------------------------------------------------------------------------
 
-function registerTools(ctx, config) {
-  const timeout = (ms) => ms ?? config.timeoutMs;
-  ctx.tools.register(
+function registerTools(ctx: TrioContext, config: BrowserConfig) {
+  const tools = ctx.get<{ register(definition: PlainToolDefinition): unknown }>("tools");
+  if (tools === undefined) return;
+  const timeout = (ms?: number) => ms ?? config.timeoutMs;
+  tools.register(
     definePlainTool({
       name: "browser_open",
       description:
@@ -714,7 +802,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_snapshot",
       description:
@@ -747,7 +835,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_click",
       description: "点击页面上匹配 CSS 选择器的元素(来自 browser_snapshot 的链接/表单分析)。",
@@ -776,7 +864,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_type",
       description:
@@ -813,7 +901,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_press",
       description:
@@ -844,7 +932,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_eval",
       description:
@@ -871,7 +959,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_screenshot",
       description:
@@ -900,7 +988,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_wait",
       description: "等待指定毫秒数(上限 60000),常用于等待页面渲染或请求完成。",
@@ -927,7 +1015,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_back",
       description: "返回上一页(如无历史则无操作)。",
@@ -944,7 +1032,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_reload",
       description: "重新加载当前页面。",
@@ -961,7 +1049,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_status",
       description: "查看浏览器会话是否打开、当前 URL 与标题。",
@@ -984,7 +1072,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_close",
       description: "关闭浏览器会话并释放资源;下次使用工具时会自动重新打开。",
@@ -1000,7 +1088,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_tabs",
       description:
@@ -1030,7 +1118,7 @@ function registerTools(ctx, config) {
       },
       render: (args, value) => {
         const lines = value.tabs.map(
-          (t) => `${t.id === value.activeId ? "▶" : " "} #${t.id} ${t.url}${t.title ? ` — ${t.title}` : ""}`,
+          (t: any) => `${t.id === value.activeId ? "▶" : " "} #${t.id} ${t.url}${t.title ? ` — ${t.title}` : ""}`,
         );
         return `tabs ${value.action}: ${lines.join("\n") || "(none)"}`;
       },
@@ -1039,7 +1127,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_download",
       description:
@@ -1068,7 +1156,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_upload",
       description:
@@ -1100,7 +1188,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_cookies",
       description:
@@ -1132,7 +1220,7 @@ function registerTools(ctx, config) {
         if (value.cleared) return "All cookies cleared";
         if (value.set) return `Cookie ${value.name} set for ${value.url}`;
         return (value.cookies ?? [])
-          .map((c) => `${c.name}=${c.value} (${c.domain}${c.path}, httpOnly=${c.httpOnly})`)
+          .map((c: any) => `${c.name}=${c.value} (${c.domain}${c.path}, httpOnly=${c.httpOnly})`)
           .join("\n") || "(no cookies)";
       },
       timeoutMs: timeout(),
@@ -1140,7 +1228,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_form",
       description:
@@ -1184,7 +1272,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_form_save",
       description:
@@ -1213,7 +1301,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_forms",
       description: "管理已保存的表单回放:list 列出,delete 删除指定表单。",
@@ -1238,7 +1326,7 @@ function registerTools(ctx, config) {
       render: (args, value) => {
         if (args.action === "delete") return value.deleted ? `Deleted "${value.name}"` : `No form "${value.name}"`;
         return (value.forms ?? [])
-          .map((f) => `"${f.name}" (${f.fields} fields): ${f.preview}`)
+          .map((f: any) => `"${f.name}" (${f.fields} fields): ${f.preview}`)
           .join("\n") || "(no saved forms)";
       },
       timeoutMs: timeout(),
@@ -1246,7 +1334,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_profile",
       description:
@@ -1271,7 +1359,7 @@ function registerTools(ctx, config) {
       render: (args, value) => {
         if (args.action === "use") return `Switched to profile "${value.current}"`;
         return value.profiles
-          .map((p) => `${p.name === value.current ? "▶" : " "} ${p.name}${p.open ? ` (open, ${p.tabs} tabs${p.persistent ? ", persistent" : ""})` : " (closed)"}${p.userDataDir ? ` → ${p.userDataDir}` : ""}`)
+          .map((p: any) => `${p.name === value.current ? "▶" : " "} ${p.name}${p.open ? ` (open, ${p.tabs} tabs${p.persistent ? ", persistent" : ""})` : " (closed)"}${p.userDataDir ? ` → ${p.userDataDir}` : ""}`)
           .join("\n") || "(no profiles configured)";
       },
       timeoutMs: timeout(),
@@ -1279,7 +1367,7 @@ function registerTools(ctx, config) {
     }),
   );
 
-  ctx.tools.register(
+  tools.register(
     definePlainTool({
       name: "browser_elements",
       description:
@@ -1303,7 +1391,7 @@ function registerTools(ctx, config) {
       render: (_args, value) =>
         (value.elements ?? [])
           .map(
-            (e) =>
+            (e: any) =>
               `<${e.tag}${e.type ? ` type=${e.type}` : ""}>${e.name ? ` name=${e.name}` : ""}${e.id ? ` id=${e.id}` : ""}${e.placeholder ? ` ph="${e.placeholder}"` : ""}${e.text ? ` "${e.text.slice(0, 40)}"` : ""}${e.selector ? ` → ${e.selector}` : ""}`,
           )
           .join("\n") || "(no interactive elements)",
@@ -1374,16 +1462,16 @@ const LIVE_VIEW_HTML = `<!doctype html>
 </body>
 </html>`;
 
-function registerLiveView(ctx, config) {
-  const webServer = ctx.get("webServer");
+function registerLiveView(ctx: TrioContext, config: BrowserConfig) {
+  const webServer = ctx.get<{ register(route: WebRoute): () => void }>("webServer");
   if (webServer === undefined) return;
-  const base = config.liveViewPath.replace(/\/+$/, "");
-  const disposers = [];
+  const base = (config.liveViewPath ?? "/trio/browser").replace(/\/+$/, "");
+  const disposers: (() => void)[] = [];
   disposers.push(
     webServer.register({
       kind: "prefix",
       path: base,
-      handler: async (req, res) => {
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
         const path = urlPath(req);
         if (path === base || path === `${base}/`) {
           sendText(res, 200, LIVE_VIEW_HTML, { "content-type": "text/html; charset=utf-8" });
@@ -1395,7 +1483,7 @@ function registerLiveView(ctx, config) {
           return;
         }
         if (path === `${base}/screenshot`) {
-          const page = sharedPage;
+          const page = activePage();
           if (page === null || page.isClosed()) {
             sendText(res, 404, "browser not open");
             return;
@@ -1428,13 +1516,15 @@ function registerLiveView(ctx, config) {
   });
 }
 
-export function apply(ctx, rawConfig) {
-  const config = { ...DEFAULT_CONFIG, ...(rawConfig ?? {}) };
+export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+  const config = resolveConfig("browser", BROWSER_SCHEMA, DEFAULT_CONFIG, rawConfig) as BrowserConfig;
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   const tools = ctx.get("tools");
   if (tools === undefined) return;
   registerTools(ctx, config);
-  const systemPrompt = ctx.get("systemPrompt");
+  const systemPrompt = ctx.get<{
+    section(section: { name: string; order?: number; text: string }): () => void;
+  }>("systemPrompt");
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:browser",
     order: 200,

@@ -1,26 +1,51 @@
 {
   "name": "dsh-trio",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DSH 全家桶:浏览器自动化 + MCP Server + GitHub/GitLab 集成 + 控制台。One install, three superpowers: browser automation, an MCP server that exposes your DeepSeek agents to any MCP client, and GitHub/GitLab automation.",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./lib/index.mjs",
+  "types": "./lib/index.d.mts",
   "exports": {
-    ".": "./src/index.js",
-    "./browser": "./src/browser.js",
-    "./mcp": "./src/mcp.js",
-    "./github": "./src/github.js",
-    "./gitlab": "./src/gitlab.js",
-    "./console": "./src/console.js",
+    ".": {
+      "types": "./lib/index.d.mts",
+      "default": "./lib/index.mjs"
+    },
+    "./browser": {
+      "types": "./lib/browser.d.mts",
+      "default": "./lib/browser.mjs"
+    },
+    "./mcp": {
+      "types": "./lib/mcp.d.mts",
+      "default": "./lib/mcp.mjs"
+    },
+    "./github": {
+      "types": "./lib/github.d.mts",
+      "default": "./lib/github.mjs"
+    },
+    "./gitlab": {
+      "types": "./lib/gitlab.d.mts",
+      "default": "./lib/gitlab.mjs"
+    },
+    "./console": {
+      "types": "./lib/console.d.mts",
+      "default": "./lib/console.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
+    "lib",
     "src",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/smoke.mjs"
+    "build": "tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "tsdown",
+    "verify": "npm run typecheck && npm run test && npm run build"
   },
   "keywords": [
     "dsh",
@@ -30,6 +55,7 @@
     "playwright",
     "mcp",
     "github",
+    "gitlab",
     "agent"
   ],
   "license": "MIT",
@@ -37,7 +63,15 @@
     "node": ">=20"
   },
   "dependencies": {
-    "playwright-core": "^1.62.1"
+    "playwright-core": "^1.49.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0-rc.7",
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.22.0",
+    "typescript": "^5.6.0",
+    "unrun": "^0.3.0",
+    "vitest": "^3.0.0"
   },
   "dsh": {
     "bundle": {

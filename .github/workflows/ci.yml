@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify bundle manifests
+        run: node -e "
+          const pkg = require('./package.json');
+          if (!pkg.dsh?.bundle?.patch) throw new Error('missing dsh.bundle.patch');
+          const fs = require('fs');
+          const patch = fs.readFileSync(pkg.dsh.bundle.patch, 'utf8');
+          for (const row of ['trio-browser', 'trio-mcp', 'trio-github', 'trio-gitlab', 'trio-console']) {
+            if (!patch.includes('id: ' + row)) throw new Error('missing row ' + row);
+          }
+          console.log('✓ bundle manifest ok (5 rows)');
+        "

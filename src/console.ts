@@ -3,10 +3,21 @@
 // 一个汇总三个模块状态的迷你控制台页。零模块耦合:页面 JS 通过同源 fetch
 // 探测各模块端点是否存在/可用。样式呼应 banner 的 anthropic.com 人文简朴风。
 
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TrioContext, WebRoute } from "./lib/types.js";
 import { urlPath, sendText } from "./lib/http.js";
+import { resolveConfig, type ConfigSchema } from "./lib/config.js";
 
 export const name = "trio-console";
 export const inject = ["webServer"];
+
+const CONSOLE_SCHEMA: ConfigSchema = {
+  enabled: { type: "boolean", optional: true },
+  path: { type: "string" },
+  mcpPath: { type: "string" },
+  browserPath: { type: "string" },
+  githubWebhookPath: { type: "string" },
+};
 
 const DEFAULT_CONFIG = {
   path: "/trio",
@@ -165,8 +176,8 @@ const CONSOLE_HTML = `<!doctype html>
 </body>
 </html>`;
 
-export function apply(ctx, rawConfig) {
-  const config = { ...DEFAULT_CONFIG, ...(rawConfig ?? {}) };
+export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+  const config = resolveConfig("console", CONSOLE_SCHEMA, DEFAULT_CONFIG, rawConfig);
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   const webServer = ctx.get("webServer");
   if (webServer === undefined) return;
@@ -174,7 +185,7 @@ export function apply(ctx, rawConfig) {
   const dispose = webServer.register({
     kind: "prefix",
     path: base,
-    handler: (req, res) => {
+    handler: (req: IncomingMessage, res: ServerResponse) => {
       const path = urlPath(req);
       if (path === base || path === `${base}/` || path === `${base}/console`) {
         sendText(res, 200, CONSOLE_HTML, { "content-type": "text/html; charset=utf-8" });

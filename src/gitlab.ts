@@ -9,12 +9,38 @@
 // 通过 PRIVATE-TOKEN header 发送。project 参数接受 "owner/repo" 形式。
 
 import { timingSafeEqual } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TrioContext, WebRoute } from "./lib/types.js";
 import { definePlainTool, genericCard } from "./lib/tools.js";
 import { runLlm } from "./lib/llm.js";
 import { readRawBody, sendJson, sendText, urlPath } from "./lib/http.js";
+import { resolveConfig, type ConfigSchema } from "./lib/config.js";
 
 export const name = "trio-gitlab";
 export const inject = ["tools"];
+
+const GITLAB_SCHEMA: ConfigSchema = {
+  enabled: { type: "boolean", optional: true },
+  tokenEnv: { type: "string" },
+  apiBase: { type: "string" },
+  webhookPath: { type: "string" },
+  webhookSecretEnv: { type: "string" },
+  reviewModel: { type: "any" },
+  reviewMaxDiffChars: { type: "number", min: 100 },
+  autoReviewEvents: { type: "string[]" },
+};
+
+/** GitLab 模块配置。 */
+export interface GitlabConfig {
+  enabled?: boolean;
+  tokenEnv?: string;
+  apiBase?: string;
+  webhookPath?: string;
+  webhookSecretEnv?: string;
+  reviewModel?: Record<string, any>;
+  reviewMaxDiffChars?: number;
+  autoReviewEvents?: string[];
+}
 
 const DEFAULT_CONFIG = {
   tokenEnv: "GITLAB_TOKEN",
@@ -35,7 +61,7 @@ const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这�
 (如有)
 不要奉承,不要输出空话。只针对 diff 中真实存在的内容。`;
 
-async function resolveToken(ctx, config) {
+async function resolveToken(ctx: TrioContext, config: GitlabConfig): Promise<string | undefined> {
   try {
     const credentials = ctx.get("credentials");
     if (credentials !== undefined) {
@@ -45,22 +71,22 @@ async function resolveToken(ctx, config) {
   } catch {
     /* fall through to env */
   }
-  return process.env[config.tokenEnv] ?? undefined;
+  return config.tokenEnv ? (process.env[config.tokenEnv] ?? undefined) : undefined;
 }
 
 /** "owner/repo" → URL 编码的 project id(owner%2Frepo)。 */
-function encodeProject(project) {
+function encodeProject(project: string): string {
   return encodeURIComponent(String(project));
 }
 
-async function glFetch(ctx, config, pathname, options = {}, signal) {
+async function glFetch(ctx: TrioContext, config: GitlabConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
   const token = await resolveToken(ctx, config);
   if (!token) {
     throw new Error(
       `GitLab token not configured: set env ${config.tokenEnv} (or via DSH credentials).`,
     );
   }
-  const headers = {
+  const headers: Record<string, string> = {
     "PRIVATE-TOKEN": token,
     "user-agent": "dsh-trio",
   };
@@ -69,12 +95,29 @@ async function glFetch(ctx, config, pathname, options = {}, signal) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-  const response = await fetch(`${config.apiBase}${pathname}`, {
-    method: options.method ?? "GET",
-    headers,
-    body,
-    signal,
-  });
+  let response: Response;
+  const retries = options.method === "GET" ? 2 : 0;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(`${config.apiBase}${pathname}`, {
+        method: options.method ?? "GET",
+        headers,
+        body,
+        signal,
+      });
+      if (attempt < retries && response.status >= 500) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      break;
+    } catch (error) {
+      if (attempt < retries && signal?.aborted !== true) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
   const text = await response.text();
   let data = null;
   try {
@@ -90,7 +133,7 @@ async function glFetch(ctx, config, pathname, options = {}, signal) {
   return data;
 }
 
-function projectIssue(issue) {
+export function projectIssue(issue: Record<string, any>) {
   return {
     iid: issue.iid,
     title: issue.title,
@@ -102,7 +145,7 @@ function projectIssue(issue) {
   };
 }
 
-function projectMr(mr) {
+export function projectMr(mr: Record<string, any>) {
   return {
     iid: mr.iid,
     title: mr.title,
@@ -115,7 +158,7 @@ function projectMr(mr) {
   };
 }
 
-function registerTools(ctx, config) {
+function registerTools(ctx: TrioContext, config: GitlabConfig) {
   const tools = ctx.get("tools");
   if (tools === undefined) return;
 
@@ -188,7 +231,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.issues
-          .map((i) => `!${i.iid} [${i.state}] ${i.title} (${i.user})`)
+          .map((i: any) => `!${i.iid} [${i.state}] ${i.title} (${i.user})`)
           .join("\n") || "(no issues)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -303,7 +346,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.mrs
-          .map((m) => `!${m.iid} [${m.state}] ${m.title} (${m.user}) ${m.source_branch}→${m.target_branch}`)
+          .map((m: any) => `!${m.iid} [${m.state}] ${m.title} (${m.user}) ${m.source_branch}→${m.target_branch}`)
           .join("\n") || "(no merge requests)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -423,14 +466,14 @@ function registerTools(ctx, config) {
   );
 }
 
-function verifyToken(rawBody, headerToken, secret) {
+export function verifyToken(rawBody: string, headerToken: string | undefined, secret: string): boolean {
   if (!headerToken) return false;
   const a = Buffer.from(String(headerToken));
   const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function extractMrRef(payload) {
+export function extractMrRef(payload: Record<string, any>): Record<string, any> | undefined {
   const attrs = payload?.object_attributes;
   const project = payload?.project;
   if (!attrs || !project?.path_with_namespace) return undefined;
@@ -447,7 +490,7 @@ function extractMrRef(payload) {
   };
 }
 
-function buildMrReviewPrompt(mr, changes) {
+function buildMrReviewPrompt(mr: Record<string, any>, changes: Record<string, any>[]): string {
   const head = `# MR !${mr.iid} ${mr.title}\n\n${mr.description ?? ""}\n\n分支:${mr.targetBranch} ← ${mr.sourceBranch}\n`;
   const diffs = (changes ?? [])
     .map((file) => {
@@ -458,12 +501,12 @@ function buildMrReviewPrompt(mr, changes) {
   return `${head}\n\n${diffs}`;
 }
 
-async function handleWebhook(ctx, config, req, res) {
+async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const secret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
   const rawBody = await readRawBody(req);
   if (secret) {
     const token = req.headers["x-gitlab-token"];
-    if (!verifyToken(rawBody, token, secret)) {
+    if (!verifyToken(rawBody, String(token ?? ""), secret)) {
       sendJson(res, 401, { error: "invalid token" });
       return;
     }
@@ -480,7 +523,7 @@ async function handleWebhook(ctx, config, req, res) {
     payload?.object_kind !== "merge_request" ||
     mr === undefined ||
     mr.state !== "opened" ||
-    !config.autoReviewEvents.includes(mr.action)
+    !(config.autoReviewEvents ?? []).includes(mr.action)
   ) {
     sendJson(res, 200, { received: true, handled: false, reason: "not a reviewable MR event" });
     return;
@@ -520,14 +563,14 @@ async function handleWebhook(ctx, config, req, res) {
   sendJson(res, 202, { received: true, handled: true, mr: mr.iid });
 }
 
-function registerWebhook(ctx, config) {
+function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
   const webServer = ctx.get("webServer");
   if (webServer === undefined) return;
-  const base = config.webhookPath.replace(/\/+$/, "");
+  const base = (config.webhookPath ?? '/trio/gitlab/webhook').replace(/\/+$/, "");
   const dispose = webServer.register({
     kind: "exact",
     path: base,
-    handler: (req, res) => {
+    handler: (req: IncomingMessage, res: ServerResponse) => {
       const path = urlPath(req);
       if (path !== base) {
         sendText(res, 404, "not found");
@@ -551,8 +594,10 @@ function registerWebhook(ctx, config) {
   });
 }
 
-export function apply(ctx, rawConfig) {
-  const config = { ...DEFAULT_CONFIG, ...(rawConfig ?? {}) };
+export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+  const config = resolveConfig("gitlab", GITLAB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GitlabConfig;
+  const tools = ctx.get("tools");
+  if (tools === undefined) return;
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   registerTools(ctx, config);
   registerWebhook(ctx, config);

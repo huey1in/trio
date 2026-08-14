@@ -10,12 +10,58 @@
 // 做 HMAC-SHA256 签名校验;评审由 ctx.llm 调用 reviewModel(默认取 agent 默认模型)。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TrioContext, WebRoute } from "./lib/types.js";
 import { definePlainTool, genericCard, workspaceCwd } from "./lib/tools.js";
 import { runLlm } from "./lib/llm.js";
 import { readRawBody, sendJson, sendText, urlPath } from "./lib/http.js";
+import { resolveConfig, type ConfigSchema } from "./lib/config.js";
 
 export const name = "trio-github";
 export const inject = ["tools"];
+
+const GITHUB_SCHEMA: ConfigSchema = {
+  enabled: { type: "boolean", optional: true },
+  tokenEnv: { type: "string" },
+  apiBase: { type: "string" },
+  webhookPath: { type: "string" },
+  webhookSecretEnv: { type: "string" },
+  reviewModel: { type: "any" },
+  reviewMaxDiffChars: { type: "number", min: 100 },
+  autoReviewEvents: { type: "string[]" },
+  reviewDedupe: { type: "boolean" },
+  autoFixRepos: { type: "any" },
+  autoFixLabels: { type: "string[]" },
+  autoFixTimeoutMs: { type: "number", min: 1000 },
+};
+
+/** GitHub 模块配置。 */
+export interface GithubConfig {
+  enabled?: boolean;
+  tokenEnv?: string;
+  apiBase?: string;
+  webhookPath?: string;
+  webhookSecretEnv?: string;
+  reviewModel?: Record<string, any>;
+  reviewMaxDiffChars?: number;
+  autoReviewEvents?: string[];
+  reviewDedupe?: boolean;
+  autoFixRepos?: Record<string, string>;
+  autoFixLabels?: string[];
+  autoFixTimeoutMs?: number;
+}
+
+/** 事件看板条目。 */
+interface GithubEventEntry {
+  ts: number;
+  event: string;
+  action: string;
+  repo: string;
+  number: number | null;
+  title: string;
+  handled: boolean;
+  detail: string;
+}
 
 const DEFAULT_CONFIG = {
   tokenEnv: "GITHUB_TOKEN",
@@ -34,9 +80,9 @@ const DEFAULT_CONFIG = {
 };
 
 /** 最近 webhook 事件(事件看板用,最多保留 50 条)。 */
-const recentEvents = [];
+const recentEvents: GithubEventEntry[] = [];
 
-function recordEvent(event, action, payload, handled, detail) {
+function recordEvent(event: string, action: string, payload: Record<string, any>, handled: boolean, detail: string): void {
   const repo = payload?.repository?.full_name ?? "";
   const number = payload?.pull_request?.number ?? payload?.issue?.number ?? payload?.number ?? null;
   recentEvents.push({
@@ -68,7 +114,7 @@ const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这�
 // GitHub API
 // ---------------------------------------------------------------------------
 
-async function resolveToken(ctx, config) {
+async function resolveToken(ctx: TrioContext, config: GithubConfig): Promise<string | undefined> {
   try {
     const credentials = ctx.get("credentials");
     if (credentials !== undefined) {
@@ -78,17 +124,17 @@ async function resolveToken(ctx, config) {
   } catch {
     /* fall through to env */
   }
-  return process.env[config.tokenEnv] ?? undefined;
+  return config.tokenEnv ? (process.env[config.tokenEnv] ?? undefined) : undefined;
 }
 
-async function ghFetch(ctx, config, pathname, options = {}, signal) {
+async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
   const token = await resolveToken(ctx, config);
   if (!token) {
     throw new Error(
       `GitHub token not configured: set env ${config.tokenEnv} (or via DSH credentials).`,
     );
   }
-  const headers = {
+  const headers: Record<string, string> = {
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
     "user-agent": "dsh-trio",
@@ -98,12 +144,29 @@ async function ghFetch(ctx, config, pathname, options = {}, signal) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-  const response = await fetch(`${config.apiBase}${pathname}`, {
-    method: options.method ?? "GET",
-    headers,
-    body,
-    signal,
-  });
+  let response: Response;
+  const retries = options.method === "GET" ? 2 : 0;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(`${config.apiBase}${pathname}`, {
+        method: options.method ?? "GET",
+        headers,
+        body,
+        signal,
+      });
+      if (attempt < retries && response.status >= 500) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      break;
+    } catch (error) {
+      if (attempt < retries && signal?.aborted !== true) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
   const text = await response.text();
   let data = null;
   try {
@@ -119,20 +182,20 @@ async function ghFetch(ctx, config, pathname, options = {}, signal) {
   return data;
 }
 
-function projectIssue(issue) {
+export function projectIssue(issue: Record<string, any>) {
   return {
     number: issue.number,
     title: issue.title,
     state: issue.state,
     user: issue.user?.login ?? "",
-    labels: (issue.labels ?? []).map((label) => (typeof label === "string" ? label : label.name ?? "")),
+    labels: (issue.labels ?? []).map((label: any) => (typeof label === "string" ? label : label.name ?? "")),
     comments: issue.comments ?? 0,
     created_at: issue.created_at,
     html_url: issue.html_url,
   };
 }
 
-function projectPr(pr) {
+export function projectPr(pr: Record<string, any>) {
   return {
     number: pr.number,
     title: pr.title,
@@ -154,14 +217,14 @@ function projectPr(pr) {
 // LLM 评审(webhook 用)
 // ---------------------------------------------------------------------------
 
-async function runReviewLlm(ctx, config, prompt, signal) {
+async function runReviewLlm(ctx: TrioContext, config: GithubConfig, prompt: string, signal: AbortSignal): Promise<string> {
   return runLlm(ctx, config.reviewModel, REVIEW_SYSTEM_PROMPT, prompt, signal, { maxTokens: 2000 });
 }
 
-function buildReviewPrompt(pr, files) {
+export function buildReviewPrompt(pr: Record<string, any>, files: Record<string, any>[]): string {
   const head = `# PR #${pr.number} ${pr.title}\n\n${pr.body ?? ""}\n\n分支:${pr.base?.ref ?? ""} ← ${pr.head?.ref ?? ""}\n改动:+${pr.additions ?? 0} / -${pr.deletions ?? 0},共 ${pr.changed_files ?? 0} 个文件\n`;
   const diffs = (files ?? [])
-    .map((file) => {
+    .map((file: any) => {
       const patch = file.patch ?? "(二进制或过大,无 patch)";
       return `### ${file.status ?? "modified"} ${file.filename} (+${file.additions ?? 0}/-${file.deletions ?? 0})\n\`\`\`diff\n${patch}\n\`\`\``;
     })
@@ -173,7 +236,7 @@ function buildReviewPrompt(pr, files) {
 // Webhook
 // ---------------------------------------------------------------------------
 
-function verifySignature(rawBody, signatureHeader, secret) {
+export function verifySignature(rawBody: string, signatureHeader: string | undefined, secret: string): boolean {
   if (!signatureHeader) return false;
   const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
   const a = Buffer.from(expected);
@@ -181,7 +244,7 @@ function verifySignature(rawBody, signatureHeader, secret) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function extractPrRef(payload) {
+export function extractPrRef(payload: Record<string, any>): Record<string, any> | undefined {
   const pr = payload?.pull_request;
   const repo = payload?.repository;
   if (!pr || !repo?.full_name) return undefined;
@@ -203,12 +266,12 @@ function extractPrRef(payload) {
   };
 }
 
-async function handleWebhook(ctx, config, req, res) {
+async function handleWebhook(ctx: TrioContext, config: GithubConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const secret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
   const rawBody = await readRawBody(req);
   if (secret) {
     const signature = req.headers["x-hub-signature-256"];
-    if (!verifySignature(rawBody, signature, secret)) {
+    if (!verifySignature(rawBody, String(signature ?? ""), secret)) {
       sendJson(res, 401, { error: "invalid signature" });
       return;
     }
@@ -220,14 +283,14 @@ async function handleWebhook(ctx, config, req, res) {
     sendJson(res, 400, { error: "invalid JSON" });
     return;
   }
-  const event = req.headers["x-github-event"] ?? "";
+  const event = String(req.headers["x-github-event"] ?? "");
   const action = payload?.action ?? "";
 
   // issue 自动修复闭环:opened 且仓库已配置 autoFixRepos
   if (event === "issues" && action === "opened" && payload?.issue !== undefined && !payload.issue.pull_request) {
     const issue = extractIssueRef(payload);
     const fullName = issue ? `${issue.owner}/${issue.repo}` : "";
-    if (issue !== undefined && fullName in (config.autoFixRepos ?? {})) {
+    if (issue !== undefined && config.autoFixRepos !== undefined && fullName in config.autoFixRepos) {
       recordEvent(event, action, payload, true, "auto-fix triggered");
       void (async () => {
         try {
@@ -246,9 +309,10 @@ async function handleWebhook(ctx, config, req, res) {
     return;
   }
 
-  if (event !== "pull_request" || !config.autoReviewEvents.includes(action)) {
-    recordEvent(event, action, payload, false, "not handled");
-    sendJson(res, 200, { received: true, event, action, handled: false });
+  const actionStr = String(action);
+  if (event !== "pull_request" || !(config.autoReviewEvents ?? []).includes(actionStr)) {
+    recordEvent(event, actionStr, payload, false, "not handled");
+    sendJson(res, 200, { received: true, event, action: actionStr, handled: false });
     return;
   }
   const pr = extractPrRef(payload);
@@ -271,7 +335,7 @@ async function handleWebhook(ctx, config, req, res) {
   sendJson(res, 202, { received: true, event, action, handled: true, pr: pr.number });
 }
 
-async function reviewPullRequest(ctx, config, pr) {
+async function reviewPullRequest(ctx: TrioContext, config: GithubConfig, pr: Record<string, any>) {
   // 评审去重:同一 head sha 已评审过则跳过
   if (config.reviewDedupe !== false && pr.headSha) {
     const key = `${pr.owner}/${pr.repo}#${pr.number}:${pr.headSha}`;
@@ -321,7 +385,7 @@ async function reviewPullRequest(ctx, config, pr) {
 /** 并发锁:同一时间只跑一个自动修复任务。 */
 let autoFixRunning = false;
 
-function buildAutoFixPrompt(issue, dir, defaultBranch) {
+function buildAutoFixPrompt(issue: Record<string, any>, dir: string, defaultBranch: string): string {
   return [
     `你是 dsh-trio 的 issue 自动修复代理。请修复以下 GitHub issue:`,
     ``,
@@ -341,7 +405,7 @@ function buildAutoFixPrompt(issue, dir, defaultBranch) {
   ].join("\n");
 }
 
-async function runAutoFix(ctx, config, issue) {
+async function runAutoFix(ctx: TrioContext, config: GithubConfig, issue: Record<string, any>) {
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const defaultModel = ctx.get("agentDefaultModel");
@@ -349,12 +413,12 @@ async function runAutoFix(ctx, config, issue) {
     throw new Error("agent services unavailable for auto-fix");
   }
   const fullName = `${issue.owner}/${issue.repo}`;
-  const dir = config.autoFixRepos[fullName];
+  const dir = (config.autoFixRepos ?? {})[fullName];
   if (typeof dir !== "string" || dir.length === 0) return;
 
   // 标签过滤
   if (Array.isArray(config.autoFixLabels) && config.autoFixLabels.length > 0) {
-    const issueLabels = (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? ""));
+    const issueLabels = (issue.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name ?? ""));
     const hit = config.autoFixLabels.some((l) => issueLabels.includes(l));
     if (!hit) {
       ctx.logger?.info?.(`dsh-trio/github: auto-fix skipped (labels ${issueLabels.join(",")} not in ${config.autoFixLabels.join(",")})`);
@@ -376,7 +440,7 @@ async function runAutoFix(ctx, config, issue) {
   }
   const branch = "fix/issue-" + issue.number;
   const sessionId = `session-fix-${issue.owner}-${issue.repo}-${issue.number}`.replace(/[^A-Za-z0-9_-]/g, "-");
-  let handle;
+  let handle: any;
   try {
     const repoData = await ghFetch(ctx, config, `/repos/${issue.owner}/${issue.repo}`);
     const defaultBranch = repoData.default_branch ?? "main";
@@ -428,7 +492,7 @@ async function runAutoFix(ctx, config, issue) {
   }
 }
 
-function extractIssueRef(payload) {
+export function extractIssueRef(payload: Record<string, any>): Record<string, any> | undefined {
   const issue = payload?.issue;
   const repo = payload?.repository;
   if (!issue || !repo?.full_name) return undefined;
@@ -447,7 +511,7 @@ function extractIssueRef(payload) {
 // 工具
 // ---------------------------------------------------------------------------
 
-function registerTools(ctx, config) {
+function registerTools(ctx: TrioContext, config: GithubConfig) {
   const tools = ctx.get("tools");
   if (tools === undefined) return;
 
@@ -524,7 +588,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.issues
-          .map((issue) => `#${issue.number} [${issue.state}] ${issue.title} (${issue.user})`)
+          .map((issue: any) => `#${issue.number} [${issue.state}] ${issue.title} (${issue.user})`)
           .join("\n") || "(no issues)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -636,7 +700,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.pulls
-          .map((pr) => `#${pr.number} [${pr.state}] ${pr.title} (${pr.user}) +${pr.additions}/-${pr.deletions}`)
+          .map((pr: any) => `#${pr.number} [${pr.state}] ${pr.title} (${pr.user}) +${pr.additions}/-${pr.deletions}`)
           .join("\n") || "(no pull requests)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -675,14 +739,14 @@ function registerTools(ctx, config) {
         required: ["pr"],
       },
       render: (args, value) =>
-        `#${value.pr.number} ${value.pr.title}\n+${value.pr.additions}/-${value.pr.deletions} in ${value.pr.changed_files} files\n${args.includeFiles ? value.pr.files.map((f) => `${f.status} ${f.filename}`).join("\n") : ""}`,
+        `#${value.pr.number} ${value.pr.title}\n+${value.pr.additions}/-${value.pr.deletions} in ${value.pr.changed_files} files\n${args.includeFiles ? value.pr.files.map((f: any) => `${f.status} ${f.filename}`).join("\n") : ""}`,
       timeoutMs: 30000,
       execute: async (args) => {
         const detail = await ghFetch(ctx, config, `/repos/${args.owner}/${args.repo}/pulls/${args.number}`);
-        const pr = projectPr(detail);
+        const pr: any = projectPr(detail);
         if (args.includeFiles === true) {
           const files = await ghFetch(ctx, config, `/repos/${args.owner}/${args.repo}/pulls/${args.number}/files?per_page=50`);
-          pr.files = (files ?? []).map((file) => ({
+          pr.files = (files ?? []).map((file: any) => ({
             filename: file.filename,
             status: file.status ?? "",
             additions: file.additions ?? 0,
@@ -881,7 +945,7 @@ function registerTools(ctx, config) {
       render: (_args, value) => `#${value.number} [${value.state}] ${value.title} — ${value.html_url}`,
       timeoutMs: 30000,
       execute: async (args) => {
-        const body = {};
+        const body: Record<string, any> = {};
         if (args.state !== undefined) body.state = args.state;
         if (args.labels !== undefined) body.labels = args.labels;
         if (args.assignees !== undefined) body.assignees = args.assignees;
@@ -927,7 +991,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.items
-          .map((i) => `#${i.number} [${i.state}] ${i.title} (${i.user})`)
+          .map((i: any) => `#${i.number} [${i.state}] ${i.title} (${i.user})`)
           .join("\n") || "(no results)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -940,7 +1004,7 @@ function registerTools(ctx, config) {
         );
         return {
           total: data.total_count ?? 0,
-          items: (data.items ?? []).map((i) => ({
+          items: (data.items ?? []).map((i: any) => ({
             number: i.number,
             title: i.title,
             state: i.state,
@@ -977,7 +1041,7 @@ function registerTools(ctx, config) {
       },
       render: (_args, value) =>
         value.runs
-          .map((run) => `#${run.id} ${run.name} [${run.status}/${run.conclusion ?? "-"}] ${run.head_branch}`)
+          .map((run: any) => `#${run.id} ${run.name} [${run.status}/${run.conclusion ?? "-"}] ${run.head_branch}`)
           .join("\n") || "(no runs)",
       timeoutMs: 30000,
       execute: async (args) => {
@@ -989,7 +1053,7 @@ function registerTools(ctx, config) {
           `/repos/${args.owner}/${args.repo}/actions/runs?per_page=${limit}${branch}`,
         );
         return {
-          runs: (data?.workflow_runs ?? []).map((run) => ({
+          runs: (data?.workflow_runs ?? []).map((run: any) => ({
             id: run.id ?? 0,
             name: run.name ?? "",
             status: run.status ?? "",
@@ -1004,14 +1068,14 @@ function registerTools(ctx, config) {
   );
 }
 
-function registerWebhook(ctx, config) {
+function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
   const webServer = ctx.get("webServer");
   if (webServer === undefined) return;
-  const base = config.webhookPath.replace(/\/+$/, "");
+  const base = (config.webhookPath ?? '/trio/github/webhook').replace(/\/+$/, "");
   const dispose = webServer.register({
     kind: "exact",
     path: base,
-    handler: (req, res) => {
+    handler: (req: IncomingMessage, res: ServerResponse) => {
       const path = urlPath(req);
       if (path !== base) {
         sendText(res, 404, "not found");
@@ -1031,7 +1095,7 @@ function registerWebhook(ctx, config) {
   const disposeEvents = webServer.register({
     kind: "exact",
     path: eventsPath,
-    handler: (req, res) => {
+    handler: (req: IncomingMessage, res: ServerResponse) => {
       if ((req.method ?? "GET") !== "GET") {
         sendText(res, 405, "method not allowed");
         return;
@@ -1049,8 +1113,8 @@ function registerWebhook(ctx, config) {
   });
 }
 
-export function apply(ctx, rawConfig) {
-  const config = { ...DEFAULT_CONFIG, ...(rawConfig ?? {}) };
+export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+  const config = resolveConfig("github", GITHUB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GithubConfig;
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   registerTools(ctx, config);
   registerWebhook(ctx, config);
@@ -1064,5 +1128,3 @@ export function apply(ctx, rawConfig) {
     ctx.effect(() => sectionDispose);
   }
 }
-
-export { buildReviewPrompt, extractPrRef, verifySignature };

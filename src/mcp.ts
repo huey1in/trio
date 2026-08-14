@@ -14,10 +14,47 @@
 //   mcpServers: { "dsh": { "url": "http://127.0.0.1:3080/trio/mcp" } }
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { readJsonBody, sendJson, sendText, openSse, urlPath, readRawBody } from "./lib/http.js";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TrioContext, WebRoute } from "./lib/types.js";
+import { readJsonBody, sendJson, sendText, openSse, urlPath, readRawBody, type SseWriter } from "./lib/http.js";
+import { resolveConfig, type ConfigSchema } from "./lib/config.js";
 
 export const name = "trio-mcp";
 export const inject = ["webServer"];
+
+const MCP_SCHEMA: ConfigSchema = {
+  enabled: { type: "boolean", optional: true },
+  path: { type: "string" },
+  authTokenEnv: { type: "string" },
+  oauthEnabled: { type: "boolean" },
+  oauthClientIdEnv: { type: "string" },
+  oauthClientSecretEnv: { type: "string" },
+  oauthTokenTtlMs: { type: "number", min: 1000 },
+  oauthTokenPath: { type: "string" },
+  runAgentTimeoutMs: { type: "number", min: 1000 },
+  runAgentMaxOutputChars: { type: "number", min: 100 },
+  listSessionsLimit: { type: "number", min: 1, max: 500 },
+};
+
+/** MCP 模块配置。 */
+export interface McpConfig {
+  enabled?: boolean;
+  path?: string;
+  authTokenEnv?: string;
+  oauthEnabled?: boolean;
+  oauthClientIdEnv?: string;
+  oauthClientSecretEnv?: string;
+  oauthTokenTtlMs?: number;
+  oauthTokenPath?: string;
+  runAgentTimeoutMs?: number;
+  runAgentMaxOutputChars?: number;
+  listSessionsLimit?: number;
+}
+
+/** 进度回调(progressToken 上报)。 */
+type ProgressFn = (progress: number, total: number, message?: string) => void;
+/** 流式输出回调(assistant 文本增量)。 */
+type DeltaFn = (delta: string) => void;
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_NAME = "dsh-trio-mcp";
@@ -38,12 +75,12 @@ const DEFAULT_CONFIG = {
 };
 
 /** 活跃的 GET SSE 客户端(用于推送 notifications/progress 等服务器通知)。 */
-const sseWriters = new Set();
+const sseWriters = new Set<SseWriter>();
 /** OAuth client_credentials 签发的 token → 过期时间戳(ms)。 */
 const oauthTokens = new Map();
 
 /** 向所有已连接 SSE 客户端推送一条 JSON-RPC 通知。 */
-function pushNotification(method, params) {
+function pushNotification(method: string, params: Record<string, unknown>) {
   for (const writer of sseWriters) {
     try {
       writer.send("message", { jsonrpc: "2.0", method, params });
@@ -54,7 +91,7 @@ function pushNotification(method, params) {
 }
 
 /** 在 tools/call 执行期间报告进度(仅当客户端带 progressToken)。 */
-function makeProgressReporter(params) {
+function makeProgressReporter(params: Record<string, any>): ProgressFn | undefined {
   const token = params?._meta?.progressToken;
   if (token === undefined || token === null) return undefined;
   let last = -1;
@@ -67,7 +104,7 @@ function makeProgressReporter(params) {
 }
 
 /** run_agent 流式输出:轮询 agent 会话,把 assistant 文本增量推给客户端。 */
-function makeDeltaReporter(params) {
+function makeDeltaReporter(params: Record<string, any>): DeltaFn | undefined {
   if (params?._meta?.streamOutput !== true && params?.stream !== true) return undefined;
   return (delta) => {
     pushNotification("notifications/message", {
@@ -78,21 +115,21 @@ function makeDeltaReporter(params) {
   };
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
 // JSON-RPC 工具
 // ---------------------------------------------------------------------------
 
-function rpcError(id, code, message) {
+export function rpcError(id: any, code: number, message: string) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-function rpcResult(id, result) {
+export function rpcResult(id: any, result: unknown) {
   return { jsonrpc: "2.0", id, result };
 }
 
-function methodNotFound(id) {
+function methodNotFound(id: any) {
   return rpcError(id, -32601, "Method not found");
 }
 
@@ -159,7 +196,7 @@ export const MCP_TOOLS = [
 ];
 
 /** 汇总一次 agent 运行:提取最新 assistant 文本与结束原因(参照官方 headless 驱动)。 */
-function summarize(events, firstSeq) {
+export function summarize(events: any[], firstSeq: number) {
   let started = false;
   let text = "";
   let reason = null;
@@ -172,8 +209,8 @@ function summarize(events, firstSeq) {
     if (!started) continue;
     if (event.type === "assistant/message") {
       const joined = (event.data?.message?.content ?? [])
-        .filter((block) => block.type === "text")
-        .map((block) => block.text ?? "")
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text ?? "")
         .join("");
       if (joined !== "") text = joined;
     }
@@ -182,21 +219,21 @@ function summarize(events, firstSeq) {
   return { text, reason };
 }
 
-function truncate(text, maxChars) {
+export function truncate(text: string, maxChars: number): string {
   if (typeof text !== "string") return "";
   return text.length > maxChars ? `${text.slice(0, maxChars)}\n…(截断)` : text;
 }
 
 /** 事件 → 一行摘要(防御性投影,任何字段缺失都不抛错)。 */
-function projectEvent(event, maxChars = 400) {
+export function projectEvent(event: Record<string, any>, maxChars = 400) {
   const { seq, type, data } = event;
   const base = { seq, type };
   try {
     if (type === "assistant/message" || type === "user/message") {
       const content = data?.message?.content ?? [];
       const text = content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text ?? "")
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text ?? "")
         .join("");
       return { ...base, text: truncate(text, maxChars) };
     }
@@ -215,7 +252,7 @@ function projectEvent(event, maxChars = 400) {
   }
 }
 
-async function listSessions(ctx, args) {
+async function listSessions(ctx: TrioContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const limit = Math.min(Math.max(Number(args?.limit ?? 50) || 50, 1), 200);
@@ -241,14 +278,14 @@ async function listSessions(ctx, args) {
   return { sessions: rows };
 }
 
-async function readSession(ctx, args) {
+async function readSession(ctx: TrioContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const sessionId = String(args?.sessionId ?? "");
   if (!sessionId) throw new Error("sessionId is required");
   const maxEvents = Math.min(Math.max(Number(args?.maxEvents ?? 200) || 200, 1), 2000);
   const snapshot = await query.readSession(sessionId);
-  const events = (snapshot.events ?? []).slice(-maxEvents).map((event) => projectEvent(event));
+  const events = (snapshot.events ?? []).slice(-maxEvents).map((event: any) => projectEvent(event));
   return {
     sessionId,
     cwd: snapshot.session?.cwd ?? "",
@@ -257,15 +294,15 @@ async function readSession(ctx, args) {
   };
 }
 
-async function searchSessions(ctx, args) {
+async function searchSessions(ctx: TrioContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const q = String(args?.query ?? "");
   if (!q) throw new Error("query is required");
   const limit = Math.min(Math.max(Number(args?.limit ?? 20) || 20, 1), 100);
   const page = await query.searchSessions({ query: q, limit });
-  const hits = (page.hits ?? []).map((hit) => {
-    const out = {};
+  const hits = (page.hits ?? []).map((hit: Record<string, any>) => {
+    const out: Record<string, any> = {};
     for (const key of ["sessionId", "title", "snippet", "score"]) {
       if (hit[key] !== undefined) out[key] = hit[key];
     }
@@ -274,7 +311,7 @@ async function searchSessions(ctx, args) {
   return { query: q, hits };
 }
 
-async function runAgent(ctx, args, onProgress, onDelta) {
+async function runAgent(ctx: TrioContext, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const defaultModel = ctx.get("agentDefaultModel");
@@ -321,8 +358,8 @@ async function runAgent(ctx, args, onProgress, onDelta) {
         seenSeq = event.seq;
         if (event.type !== "assistant/message") continue;
         const text = (event.data?.message?.content ?? [])
-          .filter((block) => block.type === "text")
-          .map((block) => block.text ?? "")
+          .filter((block: any) => block.type === "text")
+          .map((block: any) => block.text ?? "")
           .join("");
         if (text.length > pushedText.length) {
           const delta = text.slice(pushedText.length);
@@ -352,7 +389,7 @@ async function runAgent(ctx, args, onProgress, onDelta) {
   }
 }
 
-async function agentsStatus(ctx) {
+async function agentsStatus(ctx: TrioContext) {
   const agents = ctx.get("agents");
   if (agents === undefined) throw new Error("agents service unavailable");
   const list = agents.list();
@@ -369,7 +406,7 @@ async function agentsStatus(ctx) {
   return { agents: agentsOut, count: agentsOut.length };
 }
 
-async function resourcesList(ctx, args) {
+async function resourcesList(ctx: TrioContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) return { resources: [] };
   const limit = Math.min(Math.max(Number(args?.limit ?? 20) || 20, 1), 50);
@@ -393,7 +430,7 @@ async function resourcesList(ctx, args) {
   return { resources };
 }
 
-async function resourcesRead(ctx, args) {
+async function resourcesRead(ctx: TrioContext, args: Record<string, any>) {
   const uri = String(args?.uri ?? "");
   const match = uri.match(/^dsh:\/\/sessions\/(.+)$/);
   if (!match) throw new Error(`unsupported resource uri: ${uri}`);
@@ -401,7 +438,7 @@ async function resourcesRead(ctx, args) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const snapshot = await query.readSession(sessionId);
-  const events = (snapshot.events ?? []).slice(-500).map((event) => projectEvent(event, 2000));
+  const events = (snapshot.events ?? []).slice(-500).map((event: any) => projectEvent(event, 2000));
   return {
     contents: [
       {
@@ -422,7 +459,7 @@ async function resourcesRead(ctx, args) {
   };
 }
 
-async function callMcpTool(ctx, name, args, onProgress, onDelta) {
+async function callMcpTool(ctx: TrioContext, name: string, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
   switch (name) {
     case "dsh_list_sessions":
       return listSessions(ctx, args);
@@ -443,11 +480,11 @@ async function callMcpTool(ctx, name, args, onProgress, onDelta) {
 // OAuth 2.0 client_credentials(轻量实现)
 // ---------------------------------------------------------------------------
 
-function isOAuthEnabled(config) {
+function isOAuthEnabled(config: McpConfig): boolean {
   return config.oauthEnabled === true;
 }
 
-function oauthClientCredentials(config) {
+function oauthClientCredentials(config: McpConfig) {
   if (!isOAuthEnabled(config)) return undefined;
   const id = config.oauthClientIdEnv ? process.env[config.oauthClientIdEnv] : undefined;
   const secret = config.oauthClientSecretEnv ? process.env[config.oauthClientSecretEnv] : undefined;
@@ -455,7 +492,7 @@ function oauthClientCredentials(config) {
   return { id, secret };
 }
 
-function checkOAuthToken(token) {
+function checkOAuthToken(token: string): boolean {
   if (!token) return false;
   const expiry = oauthTokens.get(token);
   if (expiry === undefined) return false;
@@ -467,7 +504,7 @@ function checkOAuthToken(token) {
 }
 
 /** 处理 POST token 端点(grant_type=client_credentials)。 */
-async function handleOAuthToken(req, res, config) {
+async function handleOAuthToken(req: IncomingMessage, res: ServerResponse, config: McpConfig): Promise<void> {
   const raw = await readRawBody(req, 16384);
   let params;
   try {
@@ -505,8 +542,8 @@ async function handleOAuthToken(req, res, config) {
 }
 
 /** OAuth 授权服务器元数据(RFC 8414)。 */
-function oauthMetadata(config, host) {
-  const base = `http://${host}${config.path.replace(/\/+$/, "")}`;
+function oauthMetadata(config: McpConfig, host: string) {
+  const base = `http://${host}${(config.path ?? "/trio/mcp").replace(/\/+$/, "")}`;
   return {
     issuer: base,
     token_endpoint: `${base}/oauth/token`,
@@ -522,7 +559,7 @@ function oauthMetadata(config, host) {
 // HTTP 处理器
 // ---------------------------------------------------------------------------
 
-function checkAuth(req, config) {
+function checkAuth(req: IncomingMessage, config: McpConfig): boolean {
   const header = req.headers.authorization ?? "";
   // 静态 token(如果配置了)
   if (config.authTokenEnv) {
@@ -539,9 +576,9 @@ function checkAuth(req, config) {
   return !hasAuth;
 }
 
-function sendUnauthorized(res, config, req) {
+function sendUnauthorized(res: ServerResponse, config: McpConfig, req: IncomingMessage): void {
   const host = req.headers.host ?? "127.0.0.1";
-  const headers = {};
+  const headers: Record<string, string> = {};
   if (isOAuthEnabled(config)) {
     const meta = oauthMetadata(config, host);
     headers["www-authenticate"] = `Bearer realm="${meta.issuer}"`;
@@ -552,9 +589,9 @@ function sendUnauthorized(res, config, req) {
   sendJson(res, 401, rpcError(null, -32001, "Unauthorized"), headers);
 }
 
-async function handlePost(req, res, ctx, config) {
+async function handlePost(req: IncomingMessage, res: ServerResponse, ctx: TrioContext, config: McpConfig): Promise<void> {
   const path = urlPath(req);
-  const base = config.path.replace(/\/+$/, "");
+  const base = (config.path ?? "/trio/mcp").replace(/\/+$/, "");
   // token 端点是发证处,必须先于鉴权处理
   if (isOAuthEnabled(config) && path === `${base}/oauth/token`) {
     await handleOAuthToken(req, res, config);
@@ -575,7 +612,10 @@ async function handlePost(req, res, ctx, config) {
     sendJson(res, 400, rpcError(null, -32700, "empty body"));
     return;
   }
-  const { id, method, params } = message;
+  const msg = message as Record<string, any>;
+  const id = msg.id;
+  const method = msg.method;
+  const params = msg.params;
   const isNotification = id === undefined || id === null;
   let response;
   switch (method) {
@@ -663,7 +703,7 @@ async function handlePost(req, res, ctx, config) {
 // GET: 打开服务器 → 客户端 SSE 流(按协议先发 endpoint 事件;同时注册为
 // 通知通道,run_agent 等长任务通过它推送 notifications/progress)。
 // DELETE: 客户端会话结束,无状态实现直接 200。
-function handleGetWithConfig(req, res, config) {
+function handleGetWithConfig(req: IncomingMessage, res: ServerResponse, config: McpConfig): void {
   if (!checkAuth(req, config)) {
     sendUnauthorized(res, config, req);
     return;
@@ -684,18 +724,18 @@ function handleGetWithConfig(req, res, config) {
 // 插件
 // ---------------------------------------------------------------------------
 
-export function apply(ctx, rawConfig) {
-  const config = { ...DEFAULT_CONFIG, ...(rawConfig ?? {}) };
+export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+  const config = resolveConfig("mcp", MCP_SCHEMA, DEFAULT_CONFIG, rawConfig) as McpConfig;
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   const webServer = ctx.get("webServer");
   if (webServer === undefined) return;
-  const base = config.path.replace(/\/+$/, "");
-  const disposers = [];
+  const base = (config.path ?? "/trio/mcp").replace(/\/+$/, "");
+  const disposers: (() => void)[] = [];
   disposers.push(
     webServer.register({
       kind: "prefix",
       path: base,
-      handler: async (req, res) => {
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
         const path = urlPath(req);
         const method = req.method ?? "GET";
         const isTokenPath = isOAuthEnabled(config) && path === `${base}/oauth/token`;
@@ -739,7 +779,7 @@ export function apply(ctx, rawConfig) {
     const discoveryDispose = webServer.register({
       kind: "exact",
       path: "/.well-known/oauth-authorization-server",
-      handler: (req, res) => {
+      handler: (req: IncomingMessage, res: ServerResponse) => {
         if ((req.method ?? "GET") !== "GET") {
           sendText(res, 405, "method not allowed");
           return;
