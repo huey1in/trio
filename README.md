@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner-web.jpg" alt="dsh-trio — DeepSeek Harness 全家桶" width="100%">
+</p>
+
 # 🐋 dsh-trio — DeepSeek Harness 全家桶
 
 [![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
