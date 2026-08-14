@@ -1,0 +1,44 @@
+# dsh-trio bundle patch — 浏览器自动化 + MCP Server + GitHub 集成。
+#
+# 三条插件行:每一行都可以通过行内 config 或用户 profile 的 cordis.patch.yml
+# 覆盖调整。不需要某个模块时,在用户的 cordis.patch.yml 里删除对应行即可。
+#
+# 行内 config 键:
+#   trio-browser:  channel('auto'|'chrome'|'msedge'|'chromium'|'') headless screenshotDir liveViewPath maxTextChars
+#   trio-mcp:      path authTokenEnv runAgentTimeoutMs listSessionsLimit
+#   trio-github:   tokenEnv apiBase webhookPath webhookSecretEnv reviewModel({provider,model})
+
+- insert:
+    - id: trio-browser
+      name: dsh-trio/browser
+      config:
+        channel: auto
+        headless: true
+        screenshotDir: .dsh-trio/screenshots
+        liveViewPath: /trio/browser
+        maxTextChars: 20000
+        maxLinks: 50
+        timeoutMs: 30000
+
+    - id: trio-mcp
+      name: dsh-trio/mcp
+      config:
+        path: /trio/mcp
+        authTokenEnv: ""
+        runAgentTimeoutMs: 300000
+        runAgentMaxOutputChars: 120000
+        listSessionsLimit: 50
+
+    - id: trio-github
+      name: dsh-trio/github
+      config:
+        tokenEnv: GITHUB_TOKEN
+        apiBase: https://api.github.com
+        webhookPath: /trio/github/webhook
+        webhookSecretEnv: GITHUB_WEBHOOK_SECRET
+        reviewModel: {}
+        reviewMaxDiffChars: 60000
+        autoReviewEvents:
+          - opened
+          - synchronize
+          - reopened

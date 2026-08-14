@@ -1,0 +1,45 @@
+{
+  "name": "dsh-trio",
+  "version": "0.1.0",
+  "description": "DSH 全家桶:浏览器自动化 + MCP Server + GitHub 集成。One install, three superpowers: browser automation, an MCP server that exposes your DeepSeek agents to any MCP client, and GitHub issue/PR/webhook automation.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./browser": "./src/browser.js",
+    "./mcp": "./src/mcp.js",
+    "./github": "./src/github.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "browser",
+    "playwright",
+    "mcp",
+    "github",
+    "agent"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

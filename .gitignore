@@ -1,0 +1,6 @@
+node_modules/
+lib/
+dist/
+*.tgz
+.dsh-trio/
+.DS_Store

@@ -1,0 +1,20 @@
+# E2E 冒烟补丁:从本地绝对路径加载 dsh-trio 三个插件行(仅供测试;发布版用 cordis.patch.yml)
+- insert:
+    - id: trio-browser
+      name: file:///C:/Users/29269/Downloads/dsh/dsh-trio/src/browser.js
+      config:
+        channel: auto
+        headless: true
+        liveViewPath: /trio/browser
+
+    - id: trio-mcp
+      name: file:///C:/Users/29269/Downloads/dsh/dsh-trio/src/mcp.js
+      config:
+        path: /trio/mcp
+
+    - id: trio-github
+      name: file:///C:/Users/29269/Downloads/dsh/dsh-trio/src/github.js
+      config:
+        tokenEnv: GITHUB_TOKEN
+        webhookPath: /trio/github/webhook
+        webhookSecretEnv: ""
