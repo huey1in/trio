@@ -4,3 +4,4 @@ dist/
 *.tgz
 .dsh-trio/
 .DS_Store
+e2e.patch.yml
