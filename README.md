@@ -7,7 +7,6 @@
     <img src="https://linuxdo-seal.cuishushu.com/seals/seal-pioneer-project.svg" alt="LINUX DO Pioneer Project" width="65" height="20">
   </a>
   <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/v/dsh-trio?color=blue" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/dm/dsh-trio" alt="npm downloads"></a>
   <a href="https://github.com/huey1in/trio"><img src="https://img.shields.io/github/stars/huey1in/trio" alt="GitHub stars"></a>
   <a href="https://github.com/huey1in/trio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/huey1in/trio/ci.yml?label=CI" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/dsh-trio" alt="License: MIT"></a>
