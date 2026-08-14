@@ -3,6 +3,12 @@
 </p>
 
 <p align="center">
+  <a href="https://linux.do?ref=seal-click" target="_blank" rel="noopener noreferrer" title="LINUX DO Pioneer Project">
+    <img src="https://linuxdo-seal.cuishushu.com/seals/seal-pioneer-project.svg" alt="LINUX DO Pioneer Project" width="140" height="43">
+  </a>
+</p>
+
+<p align="center">
   <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/v/dsh-trio?color=blue" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/dm/dsh-trio" alt="npm downloads"></a>
   <a href="https://github.com/huey1in/trio"><img src="https://img.shields.io/github/stars/huey1in/trio" alt="GitHub stars"></a>
