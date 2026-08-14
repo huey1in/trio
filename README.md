@@ -1,5 +1,7 @@
 # 🐋 dsh-trio — DeepSeek Harness 全家桶
 
+[![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+
 **一条命令装三个超能力:浏览器自动化 + MCP Server + GitHub 集成。**
 
 ```
