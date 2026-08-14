@@ -122,6 +122,8 @@ export const MCP_TOOLS = [
       properties: {
         prompt: { type: "string", description: "交给 agent 的任务描述。" },
         cwd: { type: "string", description: "工作目录(默认 DSH 进程目录)。" },
+        provider: { type: "string", description: "覆盖默认模型的 provider(可选)。" },
+        model: { type: "string", description: "覆盖默认模型的 model id(可选,与 provider 一起传)。" },
         timeoutMs: { type: "integer", description: "超时毫秒,默认 300000。" },
       },
       required: ["prompt"],
@@ -265,13 +267,18 @@ async function runAgent(ctx, args, onProgress) {
   } catch (error) {
     throw new Error(`no default model configured: ${error instanceof Error ? error.message : String(error)}`);
   }
+  // 模型覆盖:provider/model 任一传入即覆盖默认选择
+  const agentOptions = {
+    provider: String(args?.provider ?? "") || selection.provider,
+    model: String(args?.model ?? "") || selection.model,
+  };
   const cwd = String(args?.cwd ?? "") || process.cwd();
   const sessionId = `session-${randomUUID()}`;
   onProgress?.(1, 4, "creating agent");
   const handle = await agents.create({
     sessionId,
     meta: { cwd },
-    agentOptions: { provider: selection.provider, model: selection.model },
+    agentOptions,
   });
   try {
     await handle.agent.whenIdle();
@@ -316,6 +323,59 @@ async function agentsStatus(ctx) {
     agentsOut.push({ sessionId: agent.id, status });
   }
   return { agents: agentsOut, count: agentsOut.length };
+}
+
+async function resourcesList(ctx, args) {
+  const query = ctx.get("sessionQuery");
+  if (query === undefined) return { resources: [] };
+  const limit = Math.min(Math.max(Number(args?.limit ?? 20) || 20, 1), 50);
+  const records = await query.listSessions();
+  const resources = [];
+  for (const record of records.slice(-limit).reverse()) {
+    let title = "";
+    try {
+      const t = await query.readTitle(record.header.id);
+      title = t?.title ?? "";
+    } catch {
+      /* defensive */
+    }
+    resources.push({
+      uri: `dsh://sessions/${record.header.id}`,
+      name: `${record.header.id}${title ? ` — ${title}` : ""}`,
+      description: `DSH 会话${record.header.cwd ? ` (cwd: ${record.header.cwd})` : ""}`,
+      mimeType: "application/json",
+    });
+  }
+  return { resources };
+}
+
+async function resourcesRead(ctx, args) {
+  const uri = String(args?.uri ?? "");
+  const match = uri.match(/^dsh:\/\/sessions\/(.+)$/);
+  if (!match) throw new Error(`unsupported resource uri: ${uri}`);
+  const sessionId = match[1];
+  const query = ctx.get("sessionQuery");
+  if (query === undefined) throw new Error("sessionQuery service unavailable");
+  const snapshot = await query.readSession(sessionId);
+  const events = (snapshot.events ?? []).slice(-500).map((event) => projectEvent(event, 2000));
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify(
+          {
+            sessionId,
+            cwd: snapshot.session?.cwd ?? "",
+            createdAt: snapshot.session?.createdAt ?? 0,
+            events,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
 }
 
 async function callMcpTool(ctx, name, args, onProgress) {
@@ -388,7 +448,33 @@ async function handlePost(req, res, ctx, config) {
       response = rpcResult(id, {});
       break;
     case "tools/list":
-      response = rpcResult(id, { tools: MCP_TOOLS });
+      response = rpcResult(id, {
+        tools: MCP_TOOLS,
+        resources: [
+          {
+            uri: "dsh://sessions",
+            name: "DSH 会话列表",
+            description: "列出最近的 DSH 会话资源(dsh://sessions/<id> 读取)。",
+            mimeType: "application/json",
+          },
+        ],
+      });
+      break;
+    case "resources/list":
+      try {
+        const result = await resourcesList(ctx, params);
+        response = rpcResult(id, result);
+      } catch (error) {
+        response = rpcError(id, -32602, error instanceof Error ? error.message : String(error));
+      }
+      break;
+    case "resources/read":
+      try {
+        const result = await resourcesRead(ctx, params);
+        response = rpcResult(id, result);
+      } catch (error) {
+        response = rpcError(id, -32602, error instanceof Error ? error.message : String(error));
+      }
       break;
     case "tools/call": {
       const name = params?.name;

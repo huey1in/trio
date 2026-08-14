@@ -46,3 +46,9 @@
     - id: trio-console
       name: dsh-trio/console
       config: {}
+
+    - id: trio-gitlab
+      name: dsh-trio/gitlab
+      config:
+        tokenEnv: GITLAB_TOKEN
+        apiBase: https://gitlab.com/api/v4

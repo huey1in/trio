@@ -7,6 +7,7 @@ const modules = {
   browser: await import("../src/browser.js"),
   mcp: await import("../src/mcp.js"),
   github: await import("../src/github.js"),
+  gitlab: await import("../src/gitlab.js"),
   console: await import("../src/console.js"),
 };
 
@@ -26,6 +27,10 @@ for (const tool of modules.mcp.MCP_TOOLS) {
 }
 console.log(`✓ mcp: ${modules.mcp.MCP_TOOLS.map((t) => t.name).join(", ")}`);
 
+// GitLab 编码
+assert.equal(modules.gitlab.encodeProject("owner/repo"), "owner%2Frepo");
+console.log("✓ gitlab: encodeProject");
+
 // GitHub 纯函数
 import { createHmac } from "node:crypto";
 const pr = modules.github.extractPrRef({
@@ -43,13 +48,14 @@ console.log("✓ github: extractPrRef / verifySignature");
 // YAML patch 基本形状(纯文本检查,避免引入 yaml 依赖)
 import { readFileSync } from "node:fs";
 const patch = readFileSync(new URL("../cordis.patch.yml", import.meta.url), "utf8");
-for (const id of ["trio-browser", "trio-mcp", "trio-github", "trio-console"]) {
+for (const id of ["trio-browser", "trio-mcp", "trio-github", "trio-console", "trio-gitlab"]) {
   assert.ok(patch.includes(`id: ${id}`), `patch contains ${id}`);
 }
 assert.ok(patch.includes("dsh-trio/browser"));
 assert.ok(patch.includes("dsh-trio/mcp"));
 assert.ok(patch.includes("dsh-trio/github"));
 assert.ok(patch.includes("dsh-trio/console"));
-console.log("✓ cordis.patch.yml: four rows");
+assert.ok(patch.includes("dsh-trio/gitlab"));
+console.log("✓ cordis.patch.yml: five rows");
 
 console.log("\n全部通过 ✅");

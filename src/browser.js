@@ -20,7 +20,9 @@ const DEFAULT_CONFIG = {
   channel: "auto", // 'auto' | 'chrome' | 'msedge' | 'chromium' | '' (playwright default)
   executablePath: "", // explicit browser executable (wins over channel)
   headless: true,
+  userDataDir: "", // 设置后登录态(Cookie/localStorage)持久化到该目录,跨 DSH 重启保留
   screenshotDir: ".dsh-trio/screenshots",
+  downloadDir: ".dsh-trio/downloads",
   liveViewPath: "/trio/browser",
   maxTextChars: 20000,
   maxLinks: 50,
@@ -31,8 +33,12 @@ const DEFAULT_CONFIG = {
 // 共享浏览器会话(模块级单例;插件 dispose 时关闭)
 // ---------------------------------------------------------------------------
 
-/** @type {import('playwright-core').Browser | null} */
-let sharedBrowser = null;
+/**
+ * 共享浏览器会话状态(模块级单例;插件 dispose 时关闭)。
+ * userDataDir 配置时走 launchPersistentContext,登录态(Cookie/存储)持久化到磁盘。
+ * @type {{ browser: import('playwright-core').Browser | null, context: import('playwright-core').BrowserContext | null, persistent: boolean }}
+ */
+const session = { browser: null, context: null, persistent: false };
 /** @type {Map<number, import('playwright-core').Page>} 多标签页表 */
 let pages = new Map();
 /** @type {number | null} 当前活动标签 id */
@@ -81,9 +87,27 @@ async function launchBrowser(config) {
   let lastError;
   for (const options of candidates) {
     try {
+      if (config.userDataDir) {
+        // 持久化配置文件目录:登录态(Cookie/localStorage)跨重启保留
+        const context = await pw.chromium.launchPersistentContext(config.userDataDir, {
+          ...options,
+          headless: config.headless,
+        });
+        for (const existing of context.pages()) {
+          existing.close().catch(() => {});
+        }
+        browserChannel = options.channel ?? options.executablePath ?? "bundled";
+        session.browser = null;
+        session.context = context;
+        session.persistent = true;
+        return;
+      }
       const browser = await pw.chromium.launch(options);
       browserChannel = options.channel ?? options.executablePath ?? "bundled";
-      return browser;
+      session.browser = browser;
+      session.context = null;
+      session.persistent = false;
+      return;
     } catch (error) {
       lastError = error;
     }
@@ -95,12 +119,19 @@ async function launchBrowser(config) {
   );
 }
 
+/** 新建一个页面(会话未启动时先启动)。 */
+async function newPage(config) {
+  if (session.browser === null && session.context === null) await launchBrowser(config);
+  const page = session.context !== null ? await session.context.newPage() : await session.browser.newPage();
+  attachPage(page, config);
+  return page;
+}
+
 /** 返回当前活动页面(没有则新建),并保证浏览器已启动。 */
 async function getPage(config) {
-  if (sharedBrowser === null) sharedBrowser = await launchBrowser(config);
+  if (session.browser === null && session.context === null) await launchBrowser(config);
   if (pages.size === 0) {
-    const page = await sharedBrowser.newPage();
-    attachPage(page, config);
+    const page = await newPage(config);
     const id = pageCounter++;
     pages.set(id, page);
     activeId = id;
@@ -129,18 +160,22 @@ async function tabList() {
 }
 
 async function closeBrowser() {
-  const browser = sharedBrowser;
-  sharedBrowser = null;
+  const { browser, context } = session;
+  session.browser = null;
+  session.context = null;
+  session.persistent = false;
   pages = new Map();
   activeId = null;
   recentDownloads.length = 0;
   browserChannel = null;
-  if (browser !== null) {
-    try {
+  try {
+    if (context !== null) {
+      await context.close();
+    } else if (browser !== null) {
       await browser.close();
-    } catch {
-      /* already closed */
     }
+  } catch {
+    /* already closed */
   }
 }
 
@@ -310,15 +345,14 @@ async function statusTool() {
 
 async function tabsTool(config, args) {
   const action = args.action ?? "list";
-  if (sharedBrowser === null && action !== "list") sharedBrowser = await launchBrowser(config);
-  if (sharedBrowser === null) return { action, tabs: [], activeId: null };
+  if (session.browser === null && session.context === null && action !== "list") await launchBrowser(config);
+  if (session.browser === null && session.context === null) return { action, tabs: [], activeId: -1 };
   switch (action) {
     case "list": {
       return { action, tabs: await tabList(), activeId: activeId ?? -1 };
     }
     case "new": {
-      const page = await sharedBrowser.newPage();
-      attachPage(page, config);
+      const page = await newPage(config);
       const id = pageCounter++;
       pages.set(id, page);
       activeId = id;
@@ -384,6 +418,27 @@ async function downloadTool(config, args, exec) {
     filename: safe,
     url: entry.download.url() ?? "",
     bytes: statSync(filePath).size,
+  };
+}
+
+async function uploadTool(config, args, exec) {
+  const page = await getPage(config);
+  const cwd = workspaceCwd(exec);
+  const filePath = isAbsolute(args.path) ? String(args.path) : resolve(cwd, String(args.path));
+  let stat;
+  try {
+    stat = statSync(filePath);
+  } catch {
+    throw new Error(`file not found: ${filePath}`);
+  }
+  if (!stat.isFile()) throw new Error(`not a file: ${filePath}`);
+  await page.setInputFiles(String(args.selector), filePath, {
+    timeout: args.timeoutMs ?? config.timeoutMs,
+  });
+  return {
+    uploaded: filePath,
+    bytes: stat.size,
+    ...(await pageIdentity(page)),
   };
 }
 
@@ -879,6 +934,38 @@ function registerTools(ctx, config) {
       render: (_args, value) => `Downloaded ${value.filename} (${value.bytes} bytes) → ${value.path}`,
       timeoutMs: timeout(),
       execute: (args, exec) => downloadTool(config, args, exec),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_upload",
+      description:
+        "把本地文件上传到页面的文件输入框(selector 指向 input[type=file])。path 可以是绝对路径或相对工作区的路径。",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "文件输入框的 CSS 选择器。" },
+          path: { type: "string", description: "要上传的文件路径。" },
+          timeoutMs: { type: "integer" },
+        },
+        required: ["selector", "path"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          uploaded: { type: "string" },
+          bytes: { type: "integer" },
+          url: { type: "string" },
+          title: { type: "string" },
+        },
+        required: ["uploaded", "bytes", "url", "title"],
+      },
+      render: (args, value) => `Uploaded ${value.uploaded} (${value.bytes} bytes) to ${args.selector}`,
+      timeoutMs: timeout(),
+      execute: (args, exec) => uploadTool(config, args, exec),
     }),
   );
 

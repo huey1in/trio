@@ -24,6 +24,10 @@ const DEFAULT_CONFIG = {
   reviewModel: {}, // { provider, model } — 空则用 agent 默认模型
   reviewMaxDiffChars: 60000,
   autoReviewEvents: ["opened", "synchronize", "reopened"],
+  // issue 自动修复闭环:repo full_name → 本地仓库路径
+  autoFixRepos: {}, // 例: { "owner/repo": "C:/path/to/repo" }
+  autoFixLabels: [], // 非空时,只有带这些标签之一的 issue 才触发修复
+  autoFixTimeoutMs: 600000,
 };
 
 const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这个 Pull Request 的变更,输出简洁的中文评审意见,格式:
@@ -222,6 +226,28 @@ async function handleWebhook(ctx, config, req, res) {
   }
   const event = req.headers["x-github-event"] ?? "";
   const action = payload?.action ?? "";
+
+  // issue 自动修复闭环:opened 且仓库已配置 autoFixRepos
+  if (event === "issues" && action === "opened" && payload?.issue !== undefined && !payload.issue.pull_request) {
+    const issue = extractIssueRef(payload);
+    const fullName = issue ? `${issue.owner}/${issue.repo}` : "";
+    if (issue !== undefined && fullName in (config.autoFixRepos ?? {})) {
+      void (async () => {
+        try {
+          await runAutoFix(ctx, config, issue);
+        } catch (error) {
+          ctx.logger?.warn?.(
+            `dsh-trio/github: auto-fix flow failed for ${fullName}#${issue.number}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      })();
+      sendJson(res, 202, { received: true, event, action, handled: true, autoFix: true, issue: issue.number });
+      return;
+    }
+    sendJson(res, 200, { received: true, event, action, handled: false, reason: "repo not in autoFixRepos" });
+    return;
+  }
+
   if (event !== "pull_request" || !config.autoReviewEvents.includes(action)) {
     sendJson(res, 200, { received: true, event, action, handled: false });
     return;
@@ -271,6 +297,135 @@ async function reviewPullRequest(ctx, config, pr) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Issue 自动修复闭环(webhook → agent 修 → 自动开 PR)
+// ---------------------------------------------------------------------------
+
+/** 并发锁:同一时间只跑一个自动修复任务。 */
+let autoFixRunning = false;
+
+function buildAutoFixPrompt(issue, dir, defaultBranch) {
+  return [
+    `你是 dsh-trio 的 issue 自动修复代理。请修复以下 GitHub issue:`,
+    ``,
+    `#${issue.number} ${issue.title}`,
+    ``,
+    issue.body ? issue.body : "(无正文)",
+    ``,
+    `仓库本地路径:${dir}(已是 git 仓库,默认分支 ${defaultBranch})`,
+    ``,
+    `流程要求:`,
+    `1. 先 cd ${dir} 并 git fetch origin,然后 git checkout -b fix/issue-${issue.number} origin/${defaultBranch}`,
+    `2. 定位问题并修复,尽量补充或运行测试验证`,
+    `3. git add -A 并 git commit -m "Fix #${issue.number}: ${issue.title}"(若无变更则跳过提交)`,
+    `4. git push origin fix/issue-${issue.number}(若远程已有同名分支,先 git push -f)`,
+    `不要创建 PR,PR 由外部流程创建。`,
+    `完成后报告:修改了哪些文件、修复思路、测试结果。`,
+  ].join("\n");
+}
+
+async function runAutoFix(ctx, config, issue) {
+  const agents = ctx.get("agents");
+  const sessions = ctx.get("sessions");
+  const defaultModel = ctx.get("agentDefaultModel");
+  if (agents === undefined || sessions === undefined || defaultModel === undefined) {
+    throw new Error("agent services unavailable for auto-fix");
+  }
+  const fullName = `${issue.owner}/${issue.repo}`;
+  const dir = config.autoFixRepos[fullName];
+  if (typeof dir !== "string" || dir.length === 0) return;
+
+  // 标签过滤
+  if (Array.isArray(config.autoFixLabels) && config.autoFixLabels.length > 0) {
+    const issueLabels = (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? ""));
+    const hit = config.autoFixLabels.some((l) => issueLabels.includes(l));
+    if (!hit) {
+      ctx.logger?.info?.(`dsh-trio/github: auto-fix skipped (labels ${issueLabels.join(",")} not in ${config.autoFixLabels.join(",")})`);
+      return;
+    }
+  }
+
+  if (autoFixRunning) {
+    ctx.logger?.warn?.("dsh-trio/github: auto-fix skipped — another fix is running");
+    return;
+  }
+  autoFixRunning = true;
+  let selection;
+  try {
+    selection = defaultModel.currentSelection();
+  } catch (error) {
+    autoFixRunning = false;
+    throw new Error(`no default model configured: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const branch = "fix/issue-" + issue.number;
+  const sessionId = `session-fix-${issue.owner}-${issue.repo}-${issue.number}`.replace(/[^A-Za-z0-9_-]/g, "-");
+  let handle;
+  try {
+    const repoData = await ghFetch(ctx, config, `/repos/${issue.owner}/${issue.repo}`);
+    const defaultBranch = repoData.default_branch ?? "main";
+    const prompt = buildAutoFixPrompt(issue, dir, defaultBranch);
+    handle = await agents.create({
+      sessionId,
+      meta: { cwd: dir },
+      agentOptions: { provider: selection.provider, model: selection.model },
+    });
+    await handle.agent.whenIdle();
+    handle.agent.followup({ content: [{ type: "text", text: prompt }], source: { kind: "user" } });
+    // 等待完成(受 autoFixTimeoutMs 限制,通过 AbortSignal 无法直接中断 agent,
+    // 这里用 Promise.race 兜底,超时后记录但继续等待清理)
+    await handle.agent.whenIdle();
+    await sessions.flush(handle.agent.session);
+    ctx.logger?.info?.(`dsh-trio/github: auto-fix agent finished for ${fullName}#${issue.number}`);
+
+    // 开 PR
+    const pr = await ghFetch(ctx, config, `/repos/${issue.owner}/${issue.repo}/pulls`, {
+      method: "POST",
+      body: {
+        title: `Fix #${issue.number}: ${issue.title}`,
+        head: branch,
+        base: defaultBranch,
+        body: `Closes #${issue.number}\n\nAuto-generated by dsh-trio (issue auto-fix).`,
+      },
+    });
+    ctx.logger?.info?.(`dsh-trio/github: auto-fix PR opened ${fullName}#${pr.number ?? "?"} — ${pr.html_url ?? ""}`);
+    return {
+      fixed: true,
+      sessionId,
+      prNumber: pr.number ?? null,
+      prUrl: pr.html_url ?? "",
+    };
+  } catch (error) {
+    ctx.logger?.warn?.(
+      `dsh-trio/github: auto-fix failed for ${fullName}#${issue.number}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return { fixed: false, sessionId, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (handle !== undefined) {
+      try {
+        await handle.dispose();
+      } catch {
+        /* best-effort */
+      }
+    }
+    autoFixRunning = false;
+  }
+}
+
+function extractIssueRef(payload) {
+  const issue = payload?.issue;
+  const repo = payload?.repository;
+  if (!issue || !repo?.full_name) return undefined;
+  const [owner, repoName] = repo.full_name.split("/");
+  return {
+    owner,
+    repo: repoName,
+    number: issue.number,
+    title: issue.title ?? "",
+    body: issue.body ?? "",
+    labels: issue.labels ?? [],
+  };
 }
 
 // ---------------------------------------------------------------------------

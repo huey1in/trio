@@ -1,7 +1,7 @@
 {
   "name": "dsh-trio",
-  "version": "0.2.0",
-  "description": "DSH 全家桶:浏览器自动化 + MCP Server + GitHub 集成 + 控制台。One install, three superpowers: browser automation, an MCP server that exposes your DeepSeek agents to any MCP client, and GitHub issue/PR/webhook automation.",
+  "version": "0.3.0",
+  "description": "DSH 全家桶:浏览器自动化 + MCP Server + GitHub/GitLab 集成 + 控制台。One install, three superpowers: browser automation, an MCP server that exposes your DeepSeek agents to any MCP client, and GitHub/GitLab automation.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -9,6 +9,7 @@
     "./browser": "./src/browser.js",
     "./mcp": "./src/mcp.js",
     "./github": "./src/github.js",
+    "./gitlab": "./src/gitlab.js",
     "./console": "./src/console.js",
     "./package.json": "./package.json"
   },

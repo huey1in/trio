@@ -22,10 +22,11 @@ dsh plugin --profile web add dsh-trio
 
 | 模块 | 做什么 | 端点/工具 |
 | --- | --- | --- |
-| 🧭 **浏览器自动化** | agent 直接操控浏览器:多标签、下载、Cookie 登录态、表单填充,人可旁观实时画面 | `browser_*` 工具 × 17 + 实时画面页 |
-| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端,长任务带流式进度 | `http://127.0.0.1:3080/trio/mcp` |
-| 🐙 **GitHub 集成** | issue/PR 全流程(含行内评论)+ webhook 自动 PR 评审 | `github_*` 工具 × 13 + webhook |
-| 🎛️ **控制台** | `/trio` 一页汇总三个模块状态(浏览器/MCP/GitHub) | `http://127.0.0.1:3080/trio` |
+| 🧭 **浏览器自动化** | agent 直接操控浏览器:多标签、下载、Cookie 登录态(可持久化)、表单填充、文件上传,人可旁观实时画面 | `browser_*` 工具 × 19 + 实时画面页 |
+| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端,长任务带流式进度,支持 resources | `http://127.0.0.1:3080/trio/mcp` |
+| 🐙 **GitHub 集成** | issue/PR 全流程(含行内评论)+ webhook 自动 PR 评审 + **issue 自动修复闭环** | `github_*` 工具 × 13 + webhook |
+| 🦊 **GitLab 集成** | GitLab 项目/issue/MR 基础操作 | `gitlab_*` 工具 × 6 |
+| 🎛️ **控制台** | `/trio` 一页汇总模块状态(浏览器/MCP/GitHub) | `http://127.0.0.1:3080/trio` |
 
 零构建、零配置依赖:`src/` 直接是发布产物,不依赖任何 `@deepseek-ai` 包(版本兼容性最大化),唯一第三方依赖是 `playwright-core`(复用你系统里已装的 Edge/Chrome,不用下载 Chromium)。
 
@@ -42,7 +43,7 @@ dsh web
 ```
 
 不需要某个模块?在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里删掉对应行
-(`trio-browser` / `trio-mcp` / `trio-github` / `trio-console`)即可,或给对应行加 `config: { enabled: false }`。
+(`trio-browser` / `trio-mcp` / `trio-github` / `trio-gitlab` / `trio-console`)即可,或给对应行加 `config: { enabled: false }`。
 
 ## 🧭 浏览器自动化
 
@@ -60,8 +61,20 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 | `browser_eval` | 页面内执行 JS 表达式或语句 |
 | `browser_screenshot` | 截图存到 `<工作区>/.dsh-trio/screenshots/` |
 | `browser_download` | 保存页面触发的下载到 `<工作区>/.dsh-trio/downloads/` |
+| `browser_upload` | 上传本地文件到页面 `input[type=file]` |
 | `browser_cookies` | Cookie 管理:list(可显示值)/ set / clear,处理登录态 |
 | `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
+
+**登录态持久化**:配置 `userDataDir` 后,浏览器使用独立的用户数据目录
+(`launchPersistentContext`),Cookie 与 localStorage **跨 DSH 重启保留**——登录一次,
+重启后 agent 还是登录状态:
+
+```yaml
+- id: trio-browser
+  name: dsh-trio/browser
+  config:
+    userDataDir: C:/path/to/dsh-trio-profile   # 留空 = 临时会话(默认)
+```
 | `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
 
 **实时画面**:浏览器打开时访问 `http://127.0.0.1:3080/trio/browser`,每 2 秒自动
@@ -114,13 +127,17 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 | `dsh_list_sessions` | 列出本机 DSH 会话(标题/目录/时间) |
 | `dsh_read_session` | 读取会话事件摘要(消息、工具调用、结束原因) |
 | `dsh_search_sessions` | 全文搜索会话 |
-| `dsh_run_agent` | **用 DSH 默认模型跑一个一次性 agent**,返回最终文本(深度研究、代码审查、多步任务);带 `_meta.progressToken` 的请求会收到 `notifications/progress` 流式进度 |
+| `dsh_run_agent` | **用 DSH 模型跑一个一次性 agent**,返回最终文本;支持 `provider`/`model` 覆盖默认模型;带 `_meta.progressToken` 时收到 `notifications/progress` 流式进度 |
 | `dsh_agents_status` | 列出当前运行中的 agent(会话 id + 状态) |
+
+**Resources 支持**:`resources/list` 暴露 `dsh://sessions/<id>` 会话资源,
+`resources/read` 读取完整事件摘要(JSON)。`tools/list` 响应中同时声明资源目录。
 
 安全:设置 `authTokenEnv`(如 `MCP_TOKEN`)后,所有请求要求
 `Authorization: Bearer <token>`。协议:零依赖手写实现 MCP
 Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
-`tools/call` / SSE 响应 / GET 事件流 / DELETE 会话 / **服务器主动进度通知**。
+`tools/call` / `resources/list` / `resources/read` / SSE 响应 / GET 事件流 /
+DELETE 会话 / **服务器主动进度通知**。
 
 ### MCP 配置
 
@@ -178,8 +195,40 @@ Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
 此后每个非 draft 的 PR 打开/更新时,DSH 会拉取 diff → 调用评审模型 →
 以 `COMMENT` 评审提交到 PR。
 
+### Issue 自动修复闭环(webhook → agent 修 → 自动开 PR)
+
+配置 `autoFixRepos`(仓库 → 本地路径)后,新 issue 会自动触发一个 DSH agent
+在本地仓库里修复:fetch → 建 `fix/issue-N` 分支 → 修复 + 测试 → push →
+**自动开 PR**(`Fix #N: 标题`,正文 `Closes #N`)。可选 `autoFixLabels`
+只处理带指定标签的 issue(如 `bug`):
+
+```yaml
+- id: trio-github
+  name: dsh-trio/github
+  config:
+    ...
+    autoFixRepos:
+      "owner/repo": C:/path/to/local/repo
+    autoFixLabels: [bug, priority-high]   # 空数组 = 所有 issue
+```
+
+> 前提:仓库 webhook 同时勾选 **Issues** 事件;本地仓库路径存在且可写;
+> agent 需要能 push(配置好 git 凭据);同一时间只跑一个修复任务。
+
 > 公网部署提示:webhook 需要能从 GitHub 访问到你的机器,可配合 frp/ngrok/
 > Cloudflare Tunnel;不要暴露到公网时务必配置 webhook secret。
+
+## 🦊 GitLab 集成
+
+凭证:环境变量或 DSH credentials 里的 `GITLAB_TOKEN`(PRIVATE-TOKEN 方式)。
+
+| 工具 | 说明 |
+| --- | --- |
+| `gitlab_project` | 项目信息(星标/fork/issues/默认分支) |
+| `gitlab_issues` / `gitlab_issue_create` / `gitlab_issue_comment` | issue 三件套 |
+| `gitlab_mr_list` / `gitlab_mr_create` | MR 列表(含来源/目标分支)/ 创建 MR |
+
+自建 GitLab 实例:改 `apiBase`(如 `https://gitlab.example.com/api/v4`)。
 
 ## 🎛️ 控制台
 
@@ -222,9 +271,14 @@ npm publish   # 纯 JS 无构建步骤,lib 即源码,无需 prepare 脚本/allow
 - [x] MCP:`dsh_run_agent` 流式进度通知 ✅(0.2.0)
 - [x] GitHub:PR 行内评论、issue 更新与搜索 ✅(0.2.0)
 - [x] `/trio` 控制台 ✅(0.2.0)
-- [ ] 浏览器:登录态持久化(userDataDir)、`browser_upload` 文件上传
-- [ ] MCP:`resources/` 支持、`dsh_run_agent` 模型覆盖参数
-- [ ] GitHub:issue 自动修复闭环(webhook → 子 agent 修 → 开 PR)、GitLab 支持
+- [x] 浏览器:登录态持久化(userDataDir)、`browser_upload` 文件上传 ✅(0.3.0)
+- [x] MCP:`resources/` 支持、`dsh_run_agent` 模型覆盖参数 ✅(0.3.0)
+- [x] GitHub:issue 自动修复闭环(webhook → 子 agent 修 → 开 PR)✅(0.3.0)
+- [x] GitLab 支持 ✅(0.3.0)
+- [ ] 浏览器:多浏览器配置文件(工作/个人)、表单保存回放
+- [ ] MCP:OAuth 鉴权、`dsh_run_agent` 流式输出(SSE 推送 assistant 增量)
+- [ ] GitHub:webhook 事件看板(控制台内展示最近事件)、评审缓存去重
+- [ ] GitLab:MR 行内评论、webhook 评审
 
 ## License
 
