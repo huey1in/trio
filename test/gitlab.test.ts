@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeProject, extractMrRef, verifyToken, projectMr, projectIssue } from "../src/gitlab.js";
+import { encodeProject, extractMrRef, verifyToken, projectMr, projectIssue } from "../src/gitlab/index.js";
 import { createHmac } from "node:crypto";
 
 describe("encodeProject", () => {

@@ -3,10 +3,10 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: [
     "src/index.ts",
-    "src/browser.ts",
-    "src/mcp.ts",
-    "src/github.ts",
-    "src/gitlab.ts",
+    "src/browser/index.ts",
+    "src/mcp/index.ts",
+    "src/github/index.ts",
+    "src/gitlab/index.ts",
     "src/console.ts",
   ],
   format: ["esm"],

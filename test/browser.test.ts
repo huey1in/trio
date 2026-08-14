@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { profileConfig } from "../src/browser.js";
+import { profileConfig } from "../src/browser/index.js";
 import { definePlainTool } from "../src/lib/tools.js";
-import type { BrowserConfig } from "../src/browser.js";
+import type { BrowserConfig } from "../src/browser/index.js";
 
 describe("profileConfig", () => {
   const base: BrowserConfig = {

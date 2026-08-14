@@ -7,7 +7,7 @@ import {
   buildReviewPrompt,
   projectIssue,
   projectPr,
-} from "../src/github.js";
+} from "../src/github/index.js";
 
 describe("verifySignature", () => {
   const secret = "top-secret";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MCP_TOOLS, summarize, truncate, projectEvent, rpcError, rpcResult } from "../src/mcp.js";
+import { MCP_TOOLS, summarize, truncate, projectEvent, rpcError, rpcResult } from "../src/mcp/index.js";
 
 describe("MCP_TOOLS", () => {
   it("暴露 5 个核心工具", () => {
