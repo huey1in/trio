@@ -65,6 +65,11 @@
   "dependencies": {
     "playwright-core": "^1.49.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.0-rc.7",
     "@types/node": "^22.0.0",
