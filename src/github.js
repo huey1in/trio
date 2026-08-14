@@ -11,6 +11,7 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { definePlainTool, genericCard, workspaceCwd } from "./lib/tools.js";
+import { runLlm } from "./lib/llm.js";
 import { readRawBody, sendJson, sendText, urlPath } from "./lib/http.js";
 
 export const name = "trio-github";
@@ -24,11 +25,35 @@ const DEFAULT_CONFIG = {
   reviewModel: {}, // { provider, model } — 空则用 agent 默认模型
   reviewMaxDiffChars: 60000,
   autoReviewEvents: ["opened", "synchronize", "reopened"],
+  // 评审去重:同一 PR 同一 head sha 只评审一次
+  reviewDedupe: true,
   // issue 自动修复闭环:repo full_name → 本地仓库路径
   autoFixRepos: {}, // 例: { "owner/repo": "C:/path/to/repo" }
   autoFixLabels: [], // 非空时,只有带这些标签之一的 issue 才触发修复
   autoFixTimeoutMs: 600000,
 };
+
+/** 最近 webhook 事件(事件看板用,最多保留 50 条)。 */
+const recentEvents = [];
+
+function recordEvent(event, action, payload, handled, detail) {
+  const repo = payload?.repository?.full_name ?? "";
+  const number = payload?.pull_request?.number ?? payload?.issue?.number ?? payload?.number ?? null;
+  recentEvents.push({
+    ts: Date.now(),
+    event,
+    action,
+    repo,
+    number,
+    title: payload?.pull_request?.title ?? payload?.issue?.title ?? "",
+    handled: handled === true,
+    detail: detail ?? "",
+  });
+  if (recentEvents.length > 50) recentEvents.shift();
+}
+
+/** 已评审的 PR(评审去重):key = owner/repo#number:headSha → ts。 */
+const reviewedPrs = new Map();
 
 const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这个 Pull Request 的变更,输出简洁的中文评审意见,格式:
 ## 总结
@@ -130,36 +155,7 @@ function projectPr(pr) {
 // ---------------------------------------------------------------------------
 
 async function runReviewLlm(ctx, config, prompt, signal) {
-  const llm = ctx.get("llm");
-  if (llm === undefined) throw new Error("llm service unavailable");
-  const spec = config.reviewModel ?? {};
-  let provider = spec.provider;
-  let model = spec.model;
-  if (!provider || !model) {
-    try {
-      const selection = ctx.get("agentDefaultModel")?.currentSelection();
-      provider = provider ?? selection?.provider;
-      model = model ?? selection?.model;
-    } catch {
-      /* keep undefined */
-    }
-  }
-  if (!provider || !model) {
-    throw new Error("no review model configured (set trio.github.reviewModel or a default model)");
-  }
-  const chunks = llm.stream({
-    provider,
-    model,
-    system: REVIEW_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: prompt }],
-    maxTokens: 2000,
-    signal,
-  });
-  let text = "";
-  for await (const chunk of chunks) {
-    if (chunk?.type === "text-delta" && typeof chunk.text === "string") text += chunk.text;
-  }
-  return text.trim();
+  return runLlm(ctx, config.reviewModel, REVIEW_SYSTEM_PROMPT, prompt, signal, { maxTokens: 2000 });
 }
 
 function buildReviewPrompt(pr, files) {
@@ -232,6 +228,7 @@ async function handleWebhook(ctx, config, req, res) {
     const issue = extractIssueRef(payload);
     const fullName = issue ? `${issue.owner}/${issue.repo}` : "";
     if (issue !== undefined && fullName in (config.autoFixRepos ?? {})) {
+      recordEvent(event, action, payload, true, "auto-fix triggered");
       void (async () => {
         try {
           await runAutoFix(ctx, config, issue);
@@ -244,19 +241,23 @@ async function handleWebhook(ctx, config, req, res) {
       sendJson(res, 202, { received: true, event, action, handled: true, autoFix: true, issue: issue.number });
       return;
     }
+    recordEvent(event, action, payload, false, "repo not in autoFixRepos");
     sendJson(res, 200, { received: true, event, action, handled: false, reason: "repo not in autoFixRepos" });
     return;
   }
 
   if (event !== "pull_request" || !config.autoReviewEvents.includes(action)) {
+    recordEvent(event, action, payload, false, "not handled");
     sendJson(res, 200, { received: true, event, action, handled: false });
     return;
   }
   const pr = extractPrRef(payload);
   if (!pr || pr.draft) {
+    recordEvent(event, action, payload, false, "draft or missing pr");
     sendJson(res, 200, { received: true, event, action, handled: false, reason: "draft or missing pr" });
     return;
   }
+  recordEvent(event, action, payload, true, "review queued");
   // 异步评审:立即返回 202,评审完成后评论到 PR。
   void (async () => {
     try {
@@ -271,6 +272,19 @@ async function handleWebhook(ctx, config, req, res) {
 }
 
 async function reviewPullRequest(ctx, config, pr) {
+  // 评审去重:同一 head sha 已评审过则跳过
+  if (config.reviewDedupe !== false && pr.headSha) {
+    const key = `${pr.owner}/${pr.repo}#${pr.number}:${pr.headSha}`;
+    if (reviewedPrs.has(key)) {
+      ctx.logger?.info?.(`dsh-trio/github: review dedupe hit for ${key}`);
+      return { deduped: true };
+    }
+    reviewedPrs.set(key, Date.now());
+    if (reviewedPrs.size > 200) {
+      const oldest = reviewedPrs.keys().next().value;
+      if (oldest !== undefined) reviewedPrs.delete(oldest);
+    }
+  }
   const detail = await ghFetch(
     ctx,
     config,
@@ -294,6 +308,7 @@ async function reviewPullRequest(ctx, config, pr) {
       body: { body: review.slice(0, 60000), event: "COMMENT" },
     });
     ctx.logger?.info?.(`dsh-trio/github: reviewed ${pr.owner}/${pr.repo}#${pr.number}`);
+    return { reviewed: true };
   } finally {
     clearTimeout(timer);
   }
@@ -1011,9 +1026,23 @@ function registerWebhook(ctx, config) {
       });
     },
   });
+  // 事件看板数据源:最近 webhook 事件(供 /trio 控制台展示)
+  const eventsPath = `${base.replace(/\/webhook$/, "")}/events`;
+  const disposeEvents = webServer.register({
+    kind: "exact",
+    path: eventsPath,
+    handler: (req, res) => {
+      if ((req.method ?? "GET") !== "GET") {
+        sendText(res, 405, "method not allowed");
+        return;
+      }
+      sendJson(res, 200, { events: recentEvents });
+    },
+  });
   ctx.effect(() => () => {
     try {
       dispose();
+      disposeEvents();
     } catch {
       /* ignore */
     }

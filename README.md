@@ -22,11 +22,11 @@ dsh plugin --profile web add dsh-trio
 
 | 模块 | 做什么 | 端点/工具 |
 | --- | --- | --- |
-| 🧭 **浏览器自动化** | agent 直接操控浏览器:多标签、下载、Cookie 登录态(可持久化)、表单填充、文件上传,人可旁观实时画面 | `browser_*` 工具 × 19 + 实时画面页 |
-| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端,长任务带流式进度,支持 resources | `http://127.0.0.1:3080/trio/mcp` |
-| 🐙 **GitHub 集成** | issue/PR 全流程(含行内评论)+ webhook 自动 PR 评审 + **issue 自动修复闭环** | `github_*` 工具 × 13 + webhook |
-| 🦊 **GitLab 集成** | GitLab 项目/issue/MR 基础操作 | `gitlab_*` 工具 × 6 |
-| 🎛️ **控制台** | `/trio` 一页汇总模块状态(浏览器/MCP/GitHub) | `http://127.0.0.1:3080/trio` |
+| 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面 | `browser_*` 工具 × 22 + 实时画面页 |
+| 🔌 **MCP Server** | 会话/agent 反向暴露,长任务流式输出 + 进度,resources,**OAuth 2.0 鉴权** | `http://127.0.0.1:3080/trio/mcp` |
+| 🐙 **GitHub 集成** | issue/PR 全流程 + webhook 自动评审(去重)+ issue 自动修复闭环 + **事件看板** | `github_*` 工具 × 13 + webhook |
+| 🦊 **GitLab 集成** | 项目/issue/MR(含行内评论)+ **webhook 自动 MR 评审** | `gitlab_*` 工具 × 7 + webhook |
+| 🎛️ **控制台** | `/trio` 一页汇总模块状态 + **GitHub 最近事件** | `http://127.0.0.1:3080/trio` |
 
 零构建、零配置依赖:`src/` 直接是发布产物,不依赖任何 `@deepseek-ai` 包(版本兼容性最大化),唯一第三方依赖是 `playwright-core`(复用你系统里已装的 Edge/Chrome,不用下载 Chromium)。
 
@@ -64,6 +64,20 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 | `browser_upload` | 上传本地文件到页面 `input[type=file]` |
 | `browser_cookies` | Cookie 管理:list(可显示值)/ set / clear,处理登录态 |
 | `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
+| `browser_profile` | **多浏览器配置**:list / use(work、personal…各自独立会话与登录态) |
+| `browser_form_save` / `browser_forms` | **表单保存与回放**:保存填充记录,`browser_form from=<name>` 一键重填 |
+
+**多配置文件**:`config.profiles` 声明命名配置,每个可带独立的 `userDataDir`
+(登录态隔离)——工作账号与个人账号互不干扰:
+
+```yaml
+- id: trio-browser
+  name: dsh-trio/browser
+  config:
+    profiles:
+      work:     { userDataDir: C:/path/work-profile, channel: msedge }
+      personal: { userDataDir: C:/path/personal-profile }
+```
 
 **登录态持久化**:配置 `userDataDir` 后,浏览器使用独立的用户数据目录
 (`launchPersistentContext`),Cookie 与 localStorage **跨 DSH 重启保留**——登录一次,
@@ -127,17 +141,35 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 | `dsh_list_sessions` | 列出本机 DSH 会话(标题/目录/时间) |
 | `dsh_read_session` | 读取会话事件摘要(消息、工具调用、结束原因) |
 | `dsh_search_sessions` | 全文搜索会话 |
-| `dsh_run_agent` | **用 DSH 模型跑一个一次性 agent**,返回最终文本;支持 `provider`/`model` 覆盖默认模型;带 `_meta.progressToken` 时收到 `notifications/progress` 流式进度 |
+| `dsh_run_agent` | **用 DSH 模型跑一个一次性 agent**,返回最终文本;支持 `provider`/`model` 覆盖;带 `_meta.progressToken` 收到进度通知;带 `_meta.streamOutput: true` 收到**逐段流式输出**(notifications/message) |
 | `dsh_agents_status` | 列出当前运行中的 agent(会话 id + 状态) |
 
 **Resources 支持**:`resources/list` 暴露 `dsh://sessions/<id>` 会话资源,
 `resources/read` 读取完整事件摘要(JSON)。`tools/list` 响应中同时声明资源目录。
 
+**OAuth 2.0 鉴权**(可选,替代静态 token):启用后提供
+`client_credentials` token 端点(`/trio/mcp/oauth/token`)与 RFC 8414
+授权服务器元数据(`/.well-known/oauth-authorization-server`):
+
+```yaml
+- id: trio-mcp
+  name: dsh-trio/mcp
+  config:
+    oauthEnabled: true
+    oauthClientIdEnv: MCP_CLIENT_ID        # 客户端凭据从环境变量读取
+    oauthClientSecretEnv: MCP_CLIENT_SECRET
+    oauthTokenTtlMs: 3600000
+```
+
+客户端流程:POST token 端点(`grant_type=client_credentials`)→ 拿
+`access_token` → 所有 MCP 请求带 `Authorization: Bearer <token>`。
+静态 `authTokenEnv` 与 OAuth 可并存;均未配置时不鉴权。
+
 安全:设置 `authTokenEnv`(如 `MCP_TOKEN`)后,所有请求要求
 `Authorization: Bearer <token>`。协议:零依赖手写实现 MCP
 Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
 `tools/call` / `resources/list` / `resources/read` / SSE 响应 / GET 事件流 /
-DELETE 会话 / **服务器主动进度通知**。
+DELETE 会话 / **服务器主动进度与流式输出通知**。
 
 ### MCP 配置
 
@@ -167,6 +199,12 @@ DELETE 会话 / **服务器主动进度通知**。
 | `github_pr_review` / `github_pr_comment` / `github_pr_merge` | 评审/评论/合并 |
 | `github_pr_review_comment` | **diff 行内评论**(path + line) |
 | `github_workflow_runs` | CI 状态 |
+
+**Webhook 评审去重**:同一 PR 的同一 head commit 只评审一次(`reviewDedupe`,
+默认开启),`synchronize` 推送新 commit 才会触发新一轮评审。
+
+**事件看板**:控制台 `/trio` 的 GitHub 卡片下方实时展示最近 webhook 事件
+(时间/类型/仓库/编号/处理结果),数据源 `GET /trio/github/events`。
 
 ### Webhook 自动评审
 
@@ -227,6 +265,12 @@ DELETE 会话 / **服务器主动进度通知**。
 | `gitlab_project` | 项目信息(星标/fork/issues/默认分支) |
 | `gitlab_issues` / `gitlab_issue_create` / `gitlab_issue_comment` | issue 三件套 |
 | `gitlab_mr_list` / `gitlab_mr_create` | MR 列表(含来源/目标分支)/ 创建 MR |
+| `gitlab_mr_inline_comment` | **MR diff 行内评论**(path + new_line) |
+
+**Webhook 自动 MR 评审**:仓库 Settings → Webhooks 添加
+`http://<机器>:3080/trio/gitlab/webhook`(Secret Token 与
+`GITLAB_WEBHOOK_SECRET` 一致,事件勾选 Merge Request)。MR 打开/更新时自动
+评审并以 note 发布(带 🤖 前缀)。`reviewModel` 配置与 GitHub 模块相同。
 
 自建 GitLab 实例:改 `apiBase`(如 `https://gitlab.example.com/api/v4`)。
 
@@ -275,10 +319,14 @@ npm publish   # 纯 JS 无构建步骤,lib 即源码,无需 prepare 脚本/allow
 - [x] MCP:`resources/` 支持、`dsh_run_agent` 模型覆盖参数 ✅(0.3.0)
 - [x] GitHub:issue 自动修复闭环(webhook → 子 agent 修 → 开 PR)✅(0.3.0)
 - [x] GitLab 支持 ✅(0.3.0)
-- [ ] 浏览器:多浏览器配置文件(工作/个人)、表单保存回放
-- [ ] MCP:OAuth 鉴权、`dsh_run_agent` 流式输出(SSE 推送 assistant 增量)
-- [ ] GitHub:webhook 事件看板(控制台内展示最近事件)、评审缓存去重
-- [ ] GitLab:MR 行内评论、webhook 评审
+- [x] 浏览器:多配置文件(工作/个人)、表单保存回放 ✅(0.4.0)
+- [x] MCP:OAuth 鉴权(client_credentials + RFC 8414)、流式输出推送 ✅(0.4.0)
+- [x] GitHub:webhook 事件看板(控制台内)、评审缓存去重 ✅(0.4.0)
+- [x] GitLab:MR 行内评论、webhook 评审 ✅(0.4.0)
+- [ ] 浏览器:表单值加密存储(敏感字段)、录制回放(动作序列)
+- [ ] MCP:`dsh_run_agent` 可取消(progress 上报 + cancel)、会话续跑
+- [ ] GitHub:webhook 事件持久化(重启保留)、批处理评审队列
+- [ ] GitLab:issue 自动修复闭环(镜像 GitHub 方案)
 
 ## License
 

@@ -21,6 +21,7 @@ const DEFAULT_CONFIG = {
   executablePath: "", // explicit browser executable (wins over channel)
   headless: true,
   userDataDir: "", // 设置后登录态(Cookie/localStorage)持久化到该目录,跨 DSH 重启保留
+  profiles: {}, // 命名浏览器配置: { work: { userDataDir, channel, headless }, personal: {...} }
   screenshotDir: ".dsh-trio/screenshots",
   downloadDir: ".dsh-trio/downloads",
   liveViewPath: "/trio/browser",
@@ -34,27 +35,53 @@ const DEFAULT_CONFIG = {
 // ---------------------------------------------------------------------------
 
 /**
- * 共享浏览器会话状态(模块级单例;插件 dispose 时关闭)。
- * userDataDir 配置时走 launchPersistentContext,登录态(Cookie/存储)持久化到磁盘。
- * @type {{ browser: import('playwright-core').Browser | null, context: import('playwright-core').BrowserContext | null, persistent: boolean }}
+ * 多配置文件浏览器会话。每个命名 profile(含默认 "default")独立隔离:
+ * 浏览器实例、标签页表、登录态(userDataDir)。插件 dispose 时全部关闭。
  */
-const session = { browser: null, context: null, persistent: false };
-/** @type {Map<number, import('playwright-core').Page>} 多标签页表 */
-let pages = new Map();
-/** @type {number | null} 当前活动标签 id */
-let activeId = null;
-/** @type {string | null} */
-let browserChannel = null;
-/** @type {number} 自增标签 id */
-let pageCounter = 0;
-/** 最近下载记录 [{ download, suggestedFilename, at }] */
-const recentDownloads = [];
+const profileStates = new Map(); // name → { browser, context, persistent, pages: Map, activeId, counter }
+/** 当前活动 profile 名(默认 "default")。 */
+let currentProfile = "default";
+/** 最近下载记录 [{ download, suggestedFilename, at }](按 profile 名隔离)。 */
+const downloadsByProfile = new Map();
+/** 已保存的表单回放:name → fields 数组。 */
+const savedForms = new Map();
+/** 最近一次 browser_form 填充的字段(供 browser_form_save 无参保存)。 */
+let lastFormFields = [];
+
+function profileConfig(config, name) {
+  const named = config.profiles?.[name];
+  if (!named || typeof named !== "object") return { ...config };
+  return {
+    ...config,
+    ...named,
+    profiles: config.profiles,
+  };
+}
+
+function getProfileState(name) {
+  let state = profileStates.get(name);
+  if (state === undefined) {
+    state = { browser: null, context: null, persistent: false, pages: new Map(), activeId: null, counter: 0 };
+    profileStates.set(name, state);
+  }
+  return state;
+}
+
+function downloadsOf(name) {
+  let list = downloadsByProfile.get(name);
+  if (list === undefined) {
+    list = [];
+    downloadsByProfile.set(name, list);
+  }
+  return list;
+}
 
 function attachPage(page, config) {
   page.setDefaultTimeout(config.timeoutMs);
   page.on("download", (download) => {
-    recentDownloads.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
-    if (recentDownloads.length > 20) recentDownloads.shift();
+    const list = downloadsOf(currentProfile);
+    list.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
+    if (list.length > 20) list.shift();
   });
 }
 
@@ -68,14 +95,16 @@ async function loadPlaywright() {
   }
 }
 
-async function launchBrowser(config) {
+async function launchProfile(name, config) {
   const pw = await loadPlaywright();
-  const base = { headless: config.headless };
+  const state = getProfileState(name);
+  const resolved = profileConfig(config, name);
+  const base = { headless: resolved.headless };
   const candidates = [];
-  if (config.executablePath) {
-    candidates.push({ ...base, executablePath: config.executablePath });
-  } else if (config.channel && config.channel !== "auto") {
-    candidates.push({ ...base, channel: config.channel });
+  if (resolved.executablePath) {
+    candidates.push({ ...base, executablePath: resolved.executablePath });
+  } else if (resolved.channel && resolved.channel !== "auto") {
+    candidates.push({ ...base, channel: resolved.channel });
   } else {
     const order =
       process.platform === "win32"
@@ -87,26 +116,26 @@ async function launchBrowser(config) {
   let lastError;
   for (const options of candidates) {
     try {
-      if (config.userDataDir) {
+      if (resolved.userDataDir) {
         // 持久化配置文件目录:登录态(Cookie/localStorage)跨重启保留
-        const context = await pw.chromium.launchPersistentContext(config.userDataDir, {
+        const context = await pw.chromium.launchPersistentContext(resolved.userDataDir, {
           ...options,
-          headless: config.headless,
+          headless: resolved.headless,
         });
         for (const existing of context.pages()) {
           existing.close().catch(() => {});
         }
-        browserChannel = options.channel ?? options.executablePath ?? "bundled";
-        session.browser = null;
-        session.context = context;
-        session.persistent = true;
+        state.browser = null;
+        state.context = context;
+        state.persistent = true;
+        state.channel = options.channel ?? options.executablePath ?? "bundled";
         return;
       }
       const browser = await pw.chromium.launch(options);
-      browserChannel = options.channel ?? options.executablePath ?? "bundled";
-      session.browser = browser;
-      session.context = null;
-      session.persistent = false;
+      state.browser = browser;
+      state.context = null;
+      state.persistent = false;
+      state.channel = options.channel ?? options.executablePath ?? "bundled";
       return;
     } catch (error) {
       lastError = error;
@@ -119,35 +148,45 @@ async function launchBrowser(config) {
   );
 }
 
-/** 新建一个页面(会话未启动时先启动)。 */
+/** 当前 profile 状态(未启动时创建空状态)。 */
+function stateOf() {
+  return getProfileState(currentProfile);
+}
+
+/** 新建一个页面(当前 profile 会话未启动时先启动)。 */
 async function newPage(config) {
-  if (session.browser === null && session.context === null) await launchBrowser(config);
-  const page = session.context !== null ? await session.context.newPage() : await session.browser.newPage();
+  const state = stateOf();
+  const resolved = profileConfig(config, currentProfile);
+  if (state.browser === null && state.context === null) await launchProfile(currentProfile, config);
+  const page = state.context !== null ? await state.context.newPage() : await state.browser.newPage();
   attachPage(page, config);
   return page;
 }
 
 /** 返回当前活动页面(没有则新建),并保证浏览器已启动。 */
 async function getPage(config) {
-  if (session.browser === null && session.context === null) await launchBrowser(config);
-  if (pages.size === 0) {
+  const state = stateOf();
+  if (state.browser === null && state.context === null) await launchProfile(currentProfile, config);
+  if (state.pages.size === 0) {
     const page = await newPage(config);
-    const id = pageCounter++;
-    pages.set(id, page);
-    activeId = id;
+    const id = state.counter++;
+    state.pages.set(id, page);
+    state.activeId = id;
   }
-  return pages.get(activeId);
+  return state.pages.get(state.activeId);
 }
 
 /** 活动页面(可能为 null,不触发启动)。 */
 function activePage() {
-  return pages.get(activeId) ?? null;
+  const state = stateOf();
+  return state.pages.get(state.activeId) ?? null;
 }
 
-/** 投影当前标签列表。 */
+/** 投影当前 profile 的标签列表。 */
 async function tabList() {
+  const state = stateOf();
   const tabs = [];
-  for (const [id, page] of pages) {
+  for (const [id, page] of state.pages) {
     let title = "";
     try {
       title = await page.title();
@@ -160,23 +199,26 @@ async function tabList() {
 }
 
 async function closeBrowser() {
-  const { browser, context } = session;
-  session.browser = null;
-  session.context = null;
-  session.persistent = false;
-  pages = new Map();
-  activeId = null;
-  recentDownloads.length = 0;
-  browserChannel = null;
-  try {
-    if (context !== null) {
-      await context.close();
-    } else if (browser !== null) {
-      await browser.close();
+  for (const [name, state] of profileStates) {
+    const { browser, context } = state;
+    state.browser = null;
+    state.context = null;
+    state.pages = new Map();
+    state.activeId = null;
+    state.counter = 0;
+    try {
+      if (context !== null) {
+        await context.close();
+      } else if (browser !== null) {
+        await browser.close();
+      }
+    } catch {
+      /* already closed */
     }
-  } catch {
-    /* already closed */
+    void name;
   }
+  profileStates.clear();
+  downloadsByProfile.clear();
 }
 
 /** Best-effort current page identity, safe when nothing is open. */
@@ -332,54 +374,68 @@ async function reloadTool(config) {
 
 async function statusTool() {
   const page = activePage();
+  const state = stateOf();
+  const profiles = [];
+  for (const [name, s] of profileStates) {
+    profiles.push({
+      name,
+      open: s.browser !== null || s.context !== null,
+      tabs: s.pages.size,
+      channel: s.channel ?? "",
+      persistent: s.persistent,
+    });
+  }
   if (page === null) {
-    return { open: false, channel: browserChannel ?? "", tabs: 0 };
+    return { open: false, profile: currentProfile, channel: state.channel ?? "", tabs: 0, profiles };
   }
   return {
     open: true,
-    channel: browserChannel ?? "",
-    tabs: pages.size,
+    profile: currentProfile,
+    channel: state.channel ?? "",
+    tabs: state.pages.size,
+    profiles,
     ...(await pageIdentity(page)),
   };
 }
 
 async function tabsTool(config, args) {
   const action = args.action ?? "list";
-  if (session.browser === null && session.context === null && action !== "list") await launchBrowser(config);
-  if (session.browser === null && session.context === null) return { action, tabs: [], activeId: -1 };
+  const state = stateOf();
+  if (state.browser === null && state.context === null && action !== "list") await launchProfile(currentProfile, config);
+  if (state.browser === null && state.context === null) return { action, tabs: [], activeId: -1 };
   switch (action) {
     case "list": {
-      return { action, tabs: await tabList(), activeId: activeId ?? -1 };
+      return { action, tabs: await tabList(), activeId: state.activeId ?? -1 };
     }
     case "new": {
       const page = await newPage(config);
-      const id = pageCounter++;
-      pages.set(id, page);
-      activeId = id;
+      const id = state.counter++;
+      state.pages.set(id, page);
+      state.activeId = id;
       if (args.url) {
         await page.goto(String(args.url), {
           waitUntil: args.waitUntil ?? "domcontentloaded",
           timeout: args.timeoutMs ?? config.timeoutMs,
         });
       }
-      return { action, tab: { id, url: page.url(), title: await page.title() }, tabs: await tabList(), activeId };
+      return { action, tab: { id, url: page.url(), title: await page.title() }, tabs: await tabList(), activeId: state.activeId };
     }
     case "switch": {
       const id = resolveTabId(args);
-      if (!pages.has(id)) throw new Error(`no tab with id ${id}`);
-      activeId = id;
-      return { action, activeId, tabs: await tabList() };
+      if (!state.pages.has(id)) throw new Error(`no tab with id ${id}`);
+      state.activeId = id;
+      return { action, activeId: state.activeId, tabs: await tabList() };
     }
     case "close": {
       const id = resolveTabId(args);
-      const page = pages.get(id);
+      const page = state.pages.get(id);
       if (page === undefined) throw new Error(`no tab with id ${id}`);
       await page.close().catch(() => {});
-      pages.delete(id);
-      if (activeId === id) {
-        activeId = pages.size > 0 ? pages.keys().next().value : null;
+      state.pages.delete(id);
+      if (state.activeId === id) {
+        state.activeId = state.pages.size > 0 ? state.pages.keys().next().value : null;
       }
-      return { action, activeId: activeId ?? -1, tabs: await tabList() };
+      return { action, activeId: state.activeId ?? -1, tabs: await tabList() };
     }
     default:
       throw new Error(`unknown tabs action: ${action}`);
@@ -387,18 +443,20 @@ async function tabsTool(config, args) {
 }
 
 function resolveTabId(args) {
+  const state = stateOf();
   if (args.id !== undefined) return Number(args.id);
   if (args.index !== undefined) {
-    const ids = [...pages.keys()];
+    const ids = [...state.pages.keys()];
     const idx = Number(args.index);
     if (idx < 0 || idx >= ids.length) throw new Error(`tab index ${idx} out of range`);
     return ids[idx];
   }
-  if (activeId !== null) return activeId;
+  if (state.activeId !== null) return state.activeId;
   throw new Error("no tab id/index given and no active tab");
 }
 
 async function downloadTool(config, args, exec) {
+  const recentDownloads = downloadsOf(currentProfile);
   if (recentDownloads.length === 0) {
     throw new Error("no recent downloads. Trigger a download in the page first (e.g. browser_click on a download link).");
   }
@@ -477,8 +535,15 @@ async function cookiesTool(config, args) {
 
 async function formTool(config, args) {
   const page = await getPage(config);
-  const fields = args.fields ?? [];
-  if (!Array.isArray(fields) || fields.length === 0) throw new Error("fields must be a non-empty array");
+  let fields = args.fields ?? [];
+  if (!Array.isArray(fields) || fields.length === 0) {
+    // 回放已保存的表单
+    if (typeof args.from === "string" && savedForms.has(args.from)) {
+      fields = savedForms.get(args.from);
+    } else {
+      throw new Error("fields must be a non-empty array (or pass from=<saved form name>)");
+    }
+  }
   const filled = [];
   for (const field of fields) {
     const value = String(field.value ?? "");
@@ -492,12 +557,78 @@ async function formTool(config, args) {
       throw new Error("each field needs a selector or a label");
     }
   }
+  lastFormFields = fields.map((f) => ({ ...f }));
   if (args.submit === true) await page.keyboard.press("Enter");
   return {
     filled,
     submit: args.submit === true,
     ...(await pageIdentity(page)),
   };
+}
+
+async function formSaveTool(args) {
+  let fields = args.fields;
+  if (!Array.isArray(fields) || fields.length === 0) {
+    if (lastFormFields.length === 0) {
+      throw new Error("no fields given and no previous browser_form to remember");
+    }
+    fields = lastFormFields;
+  }
+  const name = String(args.name ?? "");
+  if (!name) throw new Error("name is required");
+  savedForms.set(name, fields.map((f) => ({ ...f })));
+  return { saved: name, fields: fields.length };
+}
+
+async function formsTool(args) {
+  const action = args.action ?? "list";
+  if (action === "list") {
+    return {
+      forms: [...savedForms.entries()].map(([name, fields]) => ({
+        name,
+        fields: fields.length,
+        preview: fields
+          .slice(0, 3)
+          .map((f) => f.selector ?? f.label ?? "?")
+          .join(", "),
+      })),
+    };
+  }
+  if (action === "delete") {
+    if (!args.name) throw new Error("name is required");
+    const existed = savedForms.delete(String(args.name));
+    return { deleted: existed, name: String(args.name) };
+  }
+  throw new Error(`unknown forms action: ${action}`);
+}
+
+async function profileTool(config, args) {
+  const action = args.action ?? "list";
+  const available = Object.keys(config.profiles ?? {});
+  if (action === "list") {
+    return {
+      current: currentProfile,
+      profiles: available.map((name) => {
+        const state = getProfileState(name);
+        return {
+          name,
+          open: state.browser !== null || state.context !== null,
+          tabs: state.pages.size,
+          persistent: state.persistent,
+          userDataDir: profileConfig(config, name).userDataDir ?? "",
+        };
+      }),
+    };
+  }
+  if (action === "use") {
+    const name = String(args.name ?? "");
+    if (name !== "default" && !available.includes(name)) {
+      throw new Error(`unknown profile: ${name} (available: ${["default", ...available].join(", ")})`);
+    }
+    currentProfile = name;
+    return { current: currentProfile, profiles: available };
+  }
+  throw new Error(`unknown profile action: ${action}`);
 }
 
 async function elementsTool(config, args) {
@@ -1013,7 +1144,7 @@ function registerTools(ctx, config) {
     definePlainTool({
       name: "browser_form",
       description:
-        "批量填充表单:fields 数组,每项给 selector(CSS)或 label(可见文本)与 value;submit=true 时填完按回车提交。先 browser_elements 或 browser_snapshot 了解表单结构。",
+        "批量填充表单:fields 数组,每项给 selector(CSS)或 label(可见文本)与 value;submit=true 时填完按回车提交。也可 from=<已保存表单名> 回放(browser_form_save 保存)。先 browser_elements 或 browser_snapshot 了解表单结构。",
       parameters: {
         type: "object",
         properties: {
@@ -1027,12 +1158,12 @@ function registerTools(ctx, config) {
                 value: { type: "string" },
               },
             },
-            description: "要填充的字段列表。",
+            description: "要填充的字段列表(from 回放时省略)。",
           },
+          from: { type: "string", description: "回放已保存表单的名称。" },
           submit: { type: "boolean" },
           timeoutMs: { type: "integer" },
         },
-        required: ["fields"],
         additionalProperties: false,
       },
       outputSchema: {
@@ -1050,6 +1181,101 @@ function registerTools(ctx, config) {
         `Filled ${value.filled.length} field(s)${value.submit ? " and submitted" : ""}\nNow at: ${value.url}`,
       timeoutMs: timeout(),
       execute: (args) => formTool(config, args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_form_save",
+      description:
+        "把最近一次 browser_form 填充的字段保存为命名表单(或直接传 fields),之后 browser_form 用 from=<name> 一键回放。",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "表单名(回放时用)。" },
+          fields: { type: "array", items: { type: "object" }, description: "可选,不传则用最近一次填充。" },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          saved: { type: "string" },
+          fields: { type: "integer" },
+        },
+        required: ["saved", "fields"],
+      },
+      render: (_args, value) => `Saved form "${value.saved}" with ${value.fields} field(s)`,
+      timeoutMs: timeout(),
+      execute: (args) => formSaveTool(args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_forms",
+      description: "管理已保存的表单回放:list 列出,delete 删除指定表单。",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "delete"] },
+          name: { type: "string", description: "delete 时的表单名。" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          forms: { type: "array", items: { type: "object" } },
+          deleted: { type: "boolean" },
+          name: { type: "string" },
+        },
+        required: [],
+      },
+      render: (args, value) => {
+        if (args.action === "delete") return value.deleted ? `Deleted "${value.name}"` : `No form "${value.name}"`;
+        return (value.forms ?? [])
+          .map((f) => `"${f.name}" (${f.fields} fields): ${f.preview}`)
+          .join("\n") || "(no saved forms)";
+      },
+      timeoutMs: timeout(),
+      execute: (args) => formsTool(args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_profile",
+      description:
+        "多浏览器配置文件:list 列出配置的 profiles(work/personal…)与当前会话状态,use <name> 切换当前 profile(后续浏览器工具作用于该 profile)。每个 profile 可配置独立 userDataDir(登录态隔离)。",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "use"] },
+          name: { type: "string", description: "use 时的 profile 名(default 或配置的)。" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          current: { type: "string" },
+          profiles: { type: "array", items: { type: "object" } },
+        },
+        required: ["current", "profiles"],
+      },
+      render: (args, value) => {
+        if (args.action === "use") return `Switched to profile "${value.current}"`;
+        return value.profiles
+          .map((p) => `${p.name === value.current ? "▶" : " "} ${p.name}${p.open ? ` (open, ${p.tabs} tabs${p.persistent ? ", persistent" : ""})` : " (closed)"}${p.userDataDir ? ` → ${p.userDataDir}` : ""}`)
+          .join("\n") || "(no profiles configured)";
+      },
+      timeoutMs: timeout(),
+      execute: (args) => profileTool(config, args),
     }),
   );
 

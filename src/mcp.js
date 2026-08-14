@@ -13,19 +13,25 @@
 // 用法示例(客户端侧):
 //   mcpServers: { "dsh": { "url": "http://127.0.0.1:3080/trio/mcp" } }
 
-import { randomUUID } from "node:crypto";
-import { readJsonBody, sendJson, sendText, openSse, urlPath } from "./lib/http.js";
+import { randomBytes, randomUUID } from "node:crypto";
+import { readJsonBody, sendJson, sendText, openSse, urlPath, readRawBody } from "./lib/http.js";
 
 export const name = "trio-mcp";
 export const inject = ["webServer"];
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_NAME = "dsh-trio-mcp";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.3.0";
 
 const DEFAULT_CONFIG = {
   path: "/trio/mcp",
-  authTokenEnv: "", // 设置后要求 Authorization: Bearer <token>
+  authTokenEnv: "", // 静态 Bearer token 的环境变量名;设置后所有请求要求 Authorization: Bearer <token>
+  // OAuth 2.0 client_credentials(可选,与静态 token 二选一或并存)
+  oauthEnabled: false,
+  oauthClientIdEnv: "MCP_CLIENT_ID",
+  oauthClientSecretEnv: "MCP_CLIENT_SECRET",
+  oauthTokenTtlMs: 3600000,
+  oauthTokenPath: "/trio/mcp/oauth/token",
   runAgentTimeoutMs: 300000,
   runAgentMaxOutputChars: 120000,
   listSessionsLimit: 50,
@@ -33,6 +39,8 @@ const DEFAULT_CONFIG = {
 
 /** 活跃的 GET SSE 客户端(用于推送 notifications/progress 等服务器通知)。 */
 const sseWriters = new Set();
+/** OAuth client_credentials 签发的 token → 过期时间戳(ms)。 */
+const oauthTokens = new Map();
 
 /** 向所有已连接 SSE 客户端推送一条 JSON-RPC 通知。 */
 function pushNotification(method, params) {
@@ -57,6 +65,20 @@ function makeProgressReporter(params) {
     pushNotification("notifications/progress", { progressToken: token, progress: rounded, total, message });
   };
 }
+
+/** run_agent 流式输出:轮询 agent 会话,把 assistant 文本增量推给客户端。 */
+function makeDeltaReporter(params) {
+  if (params?._meta?.streamOutput !== true && params?.stream !== true) return undefined;
+  return (delta) => {
+    pushNotification("notifications/message", {
+      level: "info",
+      logger: "dsh-trio.run-agent",
+      data: { kind: "agent-delta", text: delta },
+    });
+  };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
 // JSON-RPC 工具
@@ -252,7 +274,7 @@ async function searchSessions(ctx, args) {
   return { query: q, hits };
 }
 
-async function runAgent(ctx, args, onProgress) {
+async function runAgent(ctx, args, onProgress, onDelta) {
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const defaultModel = ctx.get("agentDefaultModel");
@@ -288,7 +310,29 @@ async function runAgent(ctx, args, onProgress) {
       content: [{ type: "text", text: prompt }],
       source: { kind: "user" },
     });
-    await handle.agent.whenIdle();
+    // 等待完成,同时轮询输出增量推送流式文本
+    const donePromise = handle.agent.whenIdle();
+    let seenSeq = firstSeq;
+    let pushedText = "";
+    while (true) {
+      const events = handle.agent.session.events;
+      for (const event of events) {
+        if (event.seq <= seenSeq) continue;
+        seenSeq = event.seq;
+        if (event.type !== "assistant/message") continue;
+        const text = (event.data?.message?.content ?? [])
+          .filter((block) => block.type === "text")
+          .map((block) => block.text ?? "")
+          .join("");
+        if (text.length > pushedText.length) {
+          const delta = text.slice(pushedText.length);
+          pushedText = text;
+          onDelta?.(delta);
+        }
+      }
+      const raced = await Promise.race([donePromise.then(() => "done"), sleep(500).then(() => "tick")]);
+      if (raced === "done") break;
+    }
     onProgress?.(3, 4, "collecting result");
     await sessions.flush(handle.agent.session);
     const outcome = summarize(handle.agent.session.events, firstSeq);
@@ -378,7 +422,7 @@ async function resourcesRead(ctx, args) {
   };
 }
 
-async function callMcpTool(ctx, name, args, onProgress) {
+async function callMcpTool(ctx, name, args, onProgress, onDelta) {
   switch (name) {
     case "dsh_list_sessions":
       return listSessions(ctx, args);
@@ -387,7 +431,7 @@ async function callMcpTool(ctx, name, args, onProgress) {
     case "dsh_search_sessions":
       return searchSessions(ctx, args);
     case "dsh_run_agent":
-      return runAgent(ctx, args, onProgress);
+      return runAgent(ctx, args, onProgress, onDelta);
     case "dsh_agents_status":
       return agentsStatus(ctx);
     default:
@@ -396,20 +440,128 @@ async function callMcpTool(ctx, name, args, onProgress) {
 }
 
 // ---------------------------------------------------------------------------
+// OAuth 2.0 client_credentials(轻量实现)
+// ---------------------------------------------------------------------------
+
+function isOAuthEnabled(config) {
+  return config.oauthEnabled === true;
+}
+
+function oauthClientCredentials(config) {
+  if (!isOAuthEnabled(config)) return undefined;
+  const id = config.oauthClientIdEnv ? process.env[config.oauthClientIdEnv] : undefined;
+  const secret = config.oauthClientSecretEnv ? process.env[config.oauthClientSecretEnv] : undefined;
+  if (!id || !secret) return undefined;
+  return { id, secret };
+}
+
+function checkOAuthToken(token) {
+  if (!token) return false;
+  const expiry = oauthTokens.get(token);
+  if (expiry === undefined) return false;
+  if (Date.now() > expiry) {
+    oauthTokens.delete(token);
+    return false;
+  }
+  return true;
+}
+
+/** 处理 POST token 端点(grant_type=client_credentials)。 */
+async function handleOAuthToken(req, res, config) {
+  const raw = await readRawBody(req, 16384);
+  let params;
+  try {
+    params = new URLSearchParams(raw ?? "");
+  } catch {
+    sendJson(res, 400, { error: "invalid_request", error_description: "malformed form body" });
+    return;
+  }
+  const grant = params.get("grant_type");
+  const clientId = params.get("client_id");
+  const clientSecret = params.get("client_secret");
+  const expected = oauthClientCredentials(config);
+  if (grant !== "client_credentials") {
+    sendJson(res, 400, { error: "unsupported_grant_type" });
+    return;
+  }
+  if (expected === undefined || clientId !== expected.id || clientSecret !== expected.secret) {
+    sendJson(res, 401, { error: "invalid_client" });
+    return;
+  }
+  const token = randomBytes(24).toString("hex");
+  oauthTokens.set(token, Date.now() + (config.oauthTokenTtlMs ?? 3600000));
+  if (oauthTokens.size > 200) {
+    const now = Date.now();
+    for (const [k, v] of oauthTokens) {
+      if (v < now) oauthTokens.delete(k);
+    }
+  }
+  sendJson(res, 200, {
+    access_token: token,
+    token_type: "Bearer",
+    expires_in: Math.floor((config.oauthTokenTtlMs ?? 3600000) / 1000),
+    scope: "dsh",
+  });
+}
+
+/** OAuth 授权服务器元数据(RFC 8414)。 */
+function oauthMetadata(config, host) {
+  const base = `http://${host}${config.path.replace(/\/+$/, "")}`;
+  return {
+    issuer: base,
+    token_endpoint: `${base}/oauth/token`,
+    token_endpoint_auth_methods_supported: ["client_secret_post"],
+    response_types_supported: [],
+    grant_types_supported: ["client_credentials"],
+    scopes_supported: ["dsh"],
+    code_challenge_methods_supported: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP 处理器
 // ---------------------------------------------------------------------------
 
 function checkAuth(req, config) {
-  if (!config.authTokenEnv) return true;
-  const token = process.env[config.authTokenEnv];
-  if (!token) return true; // 未配置 token 时不拦截(配置了才要求)
   const header = req.headers.authorization ?? "";
-  return header === `Bearer ${token}`;
+  // 静态 token(如果配置了)
+  if (config.authTokenEnv) {
+    const token = process.env[config.authTokenEnv];
+    if (token && header === `Bearer ${token}`) return true;
+  }
+  // OAuth client_credentials 签发的 token
+  if (isOAuthEnabled(config)) {
+    const bearer = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    if (checkOAuthToken(bearer)) return true;
+  }
+  // 未配置任何鉴权时不拦截
+  const hasAuth = config.authTokenEnv || isOAuthEnabled(config);
+  return !hasAuth;
+}
+
+function sendUnauthorized(res, config, req) {
+  const host = req.headers.host ?? "127.0.0.1";
+  const headers = {};
+  if (isOAuthEnabled(config)) {
+    const meta = oauthMetadata(config, host);
+    headers["www-authenticate"] = `Bearer realm="${meta.issuer}"`;
+    headers["x-oauth-server-metadata"] = `http://${host}/.well-known/oauth-authorization-server`;
+  } else {
+    headers["www-authenticate"] = 'Bearer realm="dsh-trio-mcp"';
+  }
+  sendJson(res, 401, rpcError(null, -32001, "Unauthorized"), headers);
 }
 
 async function handlePost(req, res, ctx, config) {
+  const path = urlPath(req);
+  const base = config.path.replace(/\/+$/, "");
+  // token 端点是发证处,必须先于鉴权处理
+  if (isOAuthEnabled(config) && path === `${base}/oauth/token`) {
+    await handleOAuthToken(req, res, config);
+    return;
+  }
   if (!checkAuth(req, config)) {
-    sendJson(res, 401, rpcError(null, -32001, "Unauthorized"));
+    sendUnauthorized(res, config, req);
     return;
   }
   let message;
@@ -480,8 +632,9 @@ async function handlePost(req, res, ctx, config) {
       const name = params?.name;
       const args = params?.arguments ?? {};
       const onProgress = makeProgressReporter(params);
+      const onDelta = makeDeltaReporter(params);
       try {
-        const result = await callMcpTool(ctx, name, args, onProgress);
+        const result = await callMcpTool(ctx, name, args, onProgress, onDelta);
         response = rpcResult(id, {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         });
@@ -512,7 +665,7 @@ async function handlePost(req, res, ctx, config) {
 // DELETE: 客户端会话结束,无状态实现直接 200。
 function handleGetWithConfig(req, res, config) {
   if (!checkAuth(req, config)) {
-    sendJson(res, 401, rpcError(null, -32001, "Unauthorized"));
+    sendUnauthorized(res, config, req);
     return;
   }
   const writer = openSse(res);
@@ -545,7 +698,8 @@ export function apply(ctx, rawConfig) {
       handler: async (req, res) => {
         const path = urlPath(req);
         const method = req.method ?? "GET";
-        if (path !== base && path !== `${base}/`) {
+        const isTokenPath = isOAuthEnabled(config) && path === `${base}/oauth/token`;
+        if (path !== base && path !== `${base}/` && !isTokenPath) {
           sendText(res, 404, "not found");
           return;
         }
@@ -579,5 +733,24 @@ export function apply(ctx, rawConfig) {
   const port = webServer.port;
   if (typeof port === "number") {
     ctx.logger?.info?.(`dsh-trio/mcp: MCP server at http://127.0.0.1:${port}${base}`);
+  }
+  // OAuth 授权服务器元数据(RFC 8414 discovery)
+  if (isOAuthEnabled(config)) {
+    const discoveryDispose = webServer.register({
+      kind: "exact",
+      path: "/.well-known/oauth-authorization-server",
+      handler: (req, res) => {
+        if ((req.method ?? "GET") !== "GET") {
+          sendText(res, 405, "method not allowed");
+          return;
+        }
+        const host = req.headers.host ?? `127.0.0.1:${port}`;
+        sendJson(res, 200, oauthMetadata(config, host));
+      },
+    });
+    disposers.push(discoveryDispose);
+    ctx.logger?.info?.(
+      `dsh-trio/mcp: OAuth client_credentials enabled — token endpoint ${base}/oauth/token`,
+    );
   }
 }

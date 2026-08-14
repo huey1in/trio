@@ -70,10 +70,11 @@ const CONSOLE_HTML = `<!doctype html>
 
   <section class="card">
     <h2><span class="dot" id="g-dot"></span>🐙 GitHub 集成</h2>
-    <p class="desc">issue / PR 工具 · webhook 自动评审</p>
+    <p class="desc">issue / PR 工具 · webhook 自动评审 · issue 自动修复</p>
     <div class="row"><span class="k">Webhook</span><span class="v" id="g-url">-</span></div>
     <div class="row"><span class="k">端点状态</span><span class="v" id="g-status">探测中…</span></div>
-    <div class="tools" id="g-hint">配置:仓库 Settings → Webhooks 指向此 URL,事件勾选 Pull requests,并设置 GITHUB_TOKEN 与 webhook secret。</div>
+    <div class="tools" id="g-hint">配置:仓库 Settings → Webhooks 指向此 URL,事件勾选 Pull requests 与 Issues,并设置 GITHUB_TOKEN 与 webhook secret。</div>
+    <div class="tools" id="g-events" style="display:none"></div>
   </section>
 </main>
 <footer>dsh-trio · DeepSeek Harness 全家桶 — 控制台仅显示状态,不承载业务数据。</footer>
@@ -134,6 +135,24 @@ const CONSOLE_HTML = `<!doctype html>
     } else {
       $('g-dot').className = 'dot bad';
       $('g-status').textContent = '无响应 (' + g.status + ')';
+    }
+    // GitHub 事件看板
+    const ge = await probe('./github/events');
+    if (ge.ok) {
+      try {
+        const list = JSON.parse(ge.body).events || [];
+        const box = $('g-events');
+        if (list.length > 0) {
+          box.style.display = 'block';
+          box.innerHTML = '<strong>最近事件(' + list.length + '):</strong><br>' + list.slice(0, 8).map((e) => {
+            const t = new Date(e.ts);
+            const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+            return hh + ' ' + (e.handled ? '✓' : '·') + ' ' + e.event + '/' + e.action + ' ' + (e.repo || '') + (e.number ? '#' + e.number : '') + (e.title ? ' — ' + e.title.slice(0, 30) : '');
+          }).join('<br>');
+        } else {
+          box.style.display = 'none';
+        }
+      } catch {}
     }
   }
   $('m-test').addEventListener('click', async () => {
