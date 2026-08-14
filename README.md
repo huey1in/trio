@@ -22,9 +22,10 @@ dsh plugin --profile web add dsh-trio
 
 | 模块 | 做什么 | 端点/工具 |
 | --- | --- | --- |
-| 🧭 **浏览器自动化** | agent 直接操控浏览器(打开/点击/输入/截图),人可旁观实时画面 | `browser_*` 工具 × 12 + 实时画面页 |
-| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端(Claude Desktop / Cursor / Cline…) | `http://127.0.0.1:3080/trio/mcp` |
-| 🐙 **GitHub 集成** | issue/PR 全流程 + webhook 自动 PR 评审 | `github_*` 工具 × 10 + webhook |
+| 🧭 **浏览器自动化** | agent 直接操控浏览器:多标签、下载、Cookie 登录态、表单填充,人可旁观实时画面 | `browser_*` 工具 × 17 + 实时画面页 |
+| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端,长任务带流式进度 | `http://127.0.0.1:3080/trio/mcp` |
+| 🐙 **GitHub 集成** | issue/PR 全流程(含行内评论)+ webhook 自动 PR 评审 | `github_*` 工具 × 13 + webhook |
+| 🎛️ **控制台** | `/trio` 一页汇总三个模块状态(浏览器/MCP/GitHub) | `http://127.0.0.1:3080/trio` |
 
 零构建、零配置依赖:`src/` 直接是发布产物,不依赖任何 `@deepseek-ai` 包(版本兼容性最大化),唯一第三方依赖是 `playwright-core`(复用你系统里已装的 Edge/Chrome,不用下载 Chromium)。
 
@@ -41,20 +42,26 @@ dsh web
 ```
 
 不需要某个模块?在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里删掉对应行
-(`trio-browser` / `trio-mcp` / `trio-github`)即可,或给对应行加 `config: { enabled: false }`。
+(`trio-browser` / `trio-mcp` / `trio-github` / `trio-console`)即可,或给对应行加 `config: { enabled: false }`。
 
 ## 🧭 浏览器自动化
 
-给 agent 一个共享浏览器会话(默认 headless;`channel: auto` 自动探测
+给 agent 一个共享浏览器会话(**多标签页**,默认 headless;`channel: auto` 自动探测
 msedge → chrome → chromium,也可 `executablePath` 指定):
 
 | 工具 | 说明 |
 | --- | --- |
 | `browser_open` | 打开 URL |
+| `browser_tabs` | 标签管理:list / new / switch / close(按 id 或 index) |
 | `browser_snapshot` | 读取页面文本/链接/输入框(纯文本模型"看"网页的核心) |
+| `browser_elements` | 可交互元素结构化清单(input/button/select/链接 + 现成 CSS 选择器) |
 | `browser_click` / `browser_type` / `browser_press` | 点击 / 输入(可清空、可回车提交)/ 按键 |
+| `browser_form` | 批量填充表单(selector 或 label 定位,可选回车提交) |
 | `browser_eval` | 页面内执行 JS 表达式或语句 |
 | `browser_screenshot` | 截图存到 `<工作区>/.dsh-trio/screenshots/` |
+| `browser_download` | 保存页面触发的下载到 `<工作区>/.dsh-trio/downloads/` |
+| `browser_cookies` | Cookie 管理:list(可显示值)/ set / clear,处理登录态 |
+| `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
 | `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
 
 **实时画面**:浏览器打开时访问 `http://127.0.0.1:3080/trio/browser`,每 2 秒自动
@@ -78,6 +85,7 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
     executablePath: ""   # 显式指定浏览器可执行文件(优先于 channel)
     headless: true
     screenshotDir: .dsh-trio/screenshots
+    downloadDir: .dsh-trio/downloads
     liveViewPath: /trio/browser
     maxTextChars: 20000
     maxLinks: 50
@@ -106,12 +114,13 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 | `dsh_list_sessions` | 列出本机 DSH 会话(标题/目录/时间) |
 | `dsh_read_session` | 读取会话事件摘要(消息、工具调用、结束原因) |
 | `dsh_search_sessions` | 全文搜索会话 |
-| `dsh_run_agent` | **用 DSH 默认模型跑一个一次性 agent**,返回最终文本(深度研究、代码审查、多步任务) |
+| `dsh_run_agent` | **用 DSH 默认模型跑一个一次性 agent**,返回最终文本(深度研究、代码审查、多步任务);带 `_meta.progressToken` 的请求会收到 `notifications/progress` 流式进度 |
+| `dsh_agents_status` | 列出当前运行中的 agent(会话 id + 状态) |
 
 安全:设置 `authTokenEnv`(如 `MCP_TOKEN`)后,所有请求要求
 `Authorization: Bearer <token>`。协议:零依赖手写实现 MCP
 Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
-`tools/call` / SSE 响应 / GET 事件流 / DELETE 会话。
+`tools/call` / SSE 响应 / GET 事件流 / DELETE 会话 / **服务器主动进度通知**。
 
 ### MCP 配置
 
@@ -135,8 +144,11 @@ Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
 | --- | --- |
 | `github_repo` | 仓库元信息 |
 | `github_issues` / `github_issue_create` / `github_issue_comment` | issue 三板斧 |
+| `github_issue_update` | 更新 issue/PR 状态、标签、指派、标题、正文 |
+| `github_search_issues` | 仓库内 issue/PR 搜索(支持 GitHub 搜索语法) |
 | `github_pulls` / `github_pr` | PR 列表 / 详情(可带文件 diff) |
 | `github_pr_review` / `github_pr_comment` / `github_pr_merge` | 评审/评论/合并 |
+| `github_pr_review_comment` | **diff 行内评论**(path + line) |
 | `github_workflow_runs` | CI 状态 |
 
 ### Webhook 自动评审
@@ -169,6 +181,16 @@ Streamable HTTP(2025-03-26),支持 `initialize` / `ping` / `tools/list` /
 > 公网部署提示:webhook 需要能从 GitHub 访问到你的机器,可配合 frp/ngrok/
 > Cloudflare Tunnel;不要暴露到公网时务必配置 webhook secret。
 
+## 🎛️ 控制台
+
+浏览器打开 `http://127.0.0.1:3080/trio`:
+
+- **浏览器卡**:开/关状态、标签数、当前 URL,一键跳转实时画面
+- **MCP 卡**:端点协议版本、工具数量、一键"测试连接"
+- **GitHub 卡**:webhook 端点在线状态 + 配置指引
+
+页面每 5 秒自动刷新,样式与 banner 同源的 anthropic.com 人文简朴风。
+
 ## 开发与测试
 
 ```sh
@@ -196,9 +218,13 @@ npm publish   # 纯 JS 无构建步骤,lib 即源码,无需 prepare 脚本/allow
 
 ## 路线图
 
-- [ ] 浏览器:`browser_download`、多标签页、表单自动填充、Cookie/登录态持久化
-- [ ] MCP:暴露 `dsh_run_agent` 的流式进度、`resources/` 支持
-- [ ] GitHub:PR 行内评论(`path`+`line`)、issue 自动修复闭环、GitLab 支持
+- [x] 浏览器:多标签页、下载、Cookie 登录态、表单自动填充 ✅(0.2.0)
+- [x] MCP:`dsh_run_agent` 流式进度通知 ✅(0.2.0)
+- [x] GitHub:PR 行内评论、issue 更新与搜索 ✅(0.2.0)
+- [x] `/trio` 控制台 ✅(0.2.0)
+- [ ] 浏览器:登录态持久化(userDataDir)、`browser_upload` 文件上传
+- [ ] MCP:`resources/` 支持、`dsh_run_agent` 模型覆盖参数
+- [ ] GitHub:issue 自动修复闭环(webhook → 子 agent 修 → 开 PR)、GitLab 支持
 
 ## License
 

@@ -8,7 +8,7 @@
 // browser_press / browser_eval / browser_screenshot / browser_wait /
 // browser_back / browser_reload / browser_status / browser_close。
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import { definePlainTool, genericCard, workspaceCwd } from "./lib/tools.js";
 import { urlPath, sendText, sendJson } from "./lib/http.js";
@@ -33,10 +33,24 @@ const DEFAULT_CONFIG = {
 
 /** @type {import('playwright-core').Browser | null} */
 let sharedBrowser = null;
-/** @type {import('playwright-core').Page | null} */
-let sharedPage = null;
+/** @type {Map<number, import('playwright-core').Page>} 多标签页表 */
+let pages = new Map();
+/** @type {number | null} 当前活动标签 id */
+let activeId = null;
 /** @type {string | null} */
 let browserChannel = null;
+/** @type {number} 自增标签 id */
+let pageCounter = 0;
+/** 最近下载记录 [{ download, suggestedFilename, at }] */
+const recentDownloads = [];
+
+function attachPage(page, config) {
+  page.setDefaultTimeout(config.timeoutMs);
+  page.on("download", (download) => {
+    recentDownloads.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
+    if (recentDownloads.length > 20) recentDownloads.shift();
+  });
+}
 
 async function loadPlaywright() {
   try {
@@ -81,19 +95,45 @@ async function launchBrowser(config) {
   );
 }
 
+/** 返回当前活动页面(没有则新建),并保证浏览器已启动。 */
 async function getPage(config) {
   if (sharedBrowser === null) sharedBrowser = await launchBrowser(config);
-  if (sharedPage === null || sharedPage.isClosed()) {
-    sharedPage = await sharedBrowser.newPage();
-    sharedPage.setDefaultTimeout(config.timeoutMs);
+  if (pages.size === 0) {
+    const page = await sharedBrowser.newPage();
+    attachPage(page, config);
+    const id = pageCounter++;
+    pages.set(id, page);
+    activeId = id;
   }
-  return sharedPage;
+  return pages.get(activeId);
+}
+
+/** 活动页面(可能为 null,不触发启动)。 */
+function activePage() {
+  return pages.get(activeId) ?? null;
+}
+
+/** 投影当前标签列表。 */
+async function tabList() {
+  const tabs = [];
+  for (const [id, page] of pages) {
+    let title = "";
+    try {
+      title = await page.title();
+    } catch {
+      /* closed */
+    }
+    tabs.push({ id, url: page.url(), title });
+  }
+  return tabs;
 }
 
 async function closeBrowser() {
   const browser = sharedBrowser;
   sharedBrowser = null;
-  sharedPage = null;
+  pages = new Map();
+  activeId = null;
+  recentDownloads.length = 0;
   browserChannel = null;
   if (browser !== null) {
     try {
@@ -256,15 +296,189 @@ async function reloadTool(config) {
 }
 
 async function statusTool() {
-  const page = sharedPage;
-  if (page === null || page.isClosed()) {
-    return { open: false, channel: browserChannel ?? "" };
+  const page = activePage();
+  if (page === null) {
+    return { open: false, channel: browserChannel ?? "", tabs: 0 };
   }
   return {
     open: true,
     channel: browserChannel ?? "",
+    tabs: pages.size,
     ...(await pageIdentity(page)),
   };
+}
+
+async function tabsTool(config, args) {
+  const action = args.action ?? "list";
+  if (sharedBrowser === null && action !== "list") sharedBrowser = await launchBrowser(config);
+  if (sharedBrowser === null) return { action, tabs: [], activeId: null };
+  switch (action) {
+    case "list": {
+      return { action, tabs: await tabList(), activeId: activeId ?? -1 };
+    }
+    case "new": {
+      const page = await sharedBrowser.newPage();
+      attachPage(page, config);
+      const id = pageCounter++;
+      pages.set(id, page);
+      activeId = id;
+      if (args.url) {
+        await page.goto(String(args.url), {
+          waitUntil: args.waitUntil ?? "domcontentloaded",
+          timeout: args.timeoutMs ?? config.timeoutMs,
+        });
+      }
+      return { action, tab: { id, url: page.url(), title: await page.title() }, tabs: await tabList(), activeId };
+    }
+    case "switch": {
+      const id = resolveTabId(args);
+      if (!pages.has(id)) throw new Error(`no tab with id ${id}`);
+      activeId = id;
+      return { action, activeId, tabs: await tabList() };
+    }
+    case "close": {
+      const id = resolveTabId(args);
+      const page = pages.get(id);
+      if (page === undefined) throw new Error(`no tab with id ${id}`);
+      await page.close().catch(() => {});
+      pages.delete(id);
+      if (activeId === id) {
+        activeId = pages.size > 0 ? pages.keys().next().value : null;
+      }
+      return { action, activeId: activeId ?? -1, tabs: await tabList() };
+    }
+    default:
+      throw new Error(`unknown tabs action: ${action}`);
+  }
+}
+
+function resolveTabId(args) {
+  if (args.id !== undefined) return Number(args.id);
+  if (args.index !== undefined) {
+    const ids = [...pages.keys()];
+    const idx = Number(args.index);
+    if (idx < 0 || idx >= ids.length) throw new Error(`tab index ${idx} out of range`);
+    return ids[idx];
+  }
+  if (activeId !== null) return activeId;
+  throw new Error("no tab id/index given and no active tab");
+}
+
+async function downloadTool(config, args, exec) {
+  if (recentDownloads.length === 0) {
+    throw new Error("no recent downloads. Trigger a download in the page first (e.g. browser_click on a download link).");
+  }
+  const index = args.index !== undefined ? Number(args.index) : recentDownloads.length - 1;
+  const entry = recentDownloads[index];
+  if (entry === undefined) throw new Error(`no download at index ${index}`);
+  const cwd = workspaceCwd(exec);
+  const dir = isAbsolute(config.downloadDir ?? ".dsh-trio/downloads")
+    ? config.downloadDir
+    : resolve(cwd, config.downloadDir ?? ".dsh-trio/downloads");
+  mkdirSync(dir, { recursive: true });
+  const safe = String(entry.suggestedFilename || `download-${Date.now()}`).replace(/[\\/:*?"<>|]/g, "_");
+  const filePath = join(dir, safe);
+  await entry.download.saveAs(filePath);
+  return {
+    path: filePath,
+    filename: safe,
+    url: entry.download.url() ?? "",
+    bytes: statSync(filePath).size,
+  };
+}
+
+async function cookiesTool(config, args) {
+  const page = await getPage(config);
+  const context = page.context();
+  const action = args.action ?? "list";
+  if (action === "list") {
+    const cookies = await context.cookies(args.url ?? page.url());
+    return {
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: args.showValues === true ? c.value : "(hidden — set showValues=true to reveal)",
+        domain: c.domain,
+        path: c.path,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+        sameSite: c.sameSite,
+        expires: c.expires,
+      })),
+    };
+  }
+  if (action === "set") {
+    if (!args.name || args.value === undefined) throw new Error("set requires name and value");
+    await context.addCookies([
+      { name: String(args.name), value: String(args.value), url: args.url ?? page.url() },
+    ]);
+    return { set: true, name: String(args.name), url: args.url ?? page.url() };
+  }
+  if (action === "clear") {
+    await context.clearCookies();
+    return { cleared: true };
+  }
+  throw new Error(`unknown cookies action: ${action}`);
+}
+
+async function formTool(config, args) {
+  const page = await getPage(config);
+  const fields = args.fields ?? [];
+  if (!Array.isArray(fields) || fields.length === 0) throw new Error("fields must be a non-empty array");
+  const filled = [];
+  for (const field of fields) {
+    const value = String(field.value ?? "");
+    if (field.selector) {
+      await page.fill(String(field.selector), value, { timeout: args.timeoutMs ?? config.timeoutMs });
+      filled.push({ selector: field.selector });
+    } else if (field.label) {
+      await page.getByLabel(String(field.label), { exact: true }).fill(value);
+      filled.push({ label: field.label });
+    } else {
+      throw new Error("each field needs a selector or a label");
+    }
+  }
+  if (args.submit === true) await page.keyboard.press("Enter");
+  return {
+    filled,
+    submit: args.submit === true,
+    ...(await pageIdentity(page)),
+  };
+}
+
+async function elementsTool(config, args) {
+  const page = await getPage(config);
+  const max = Math.min(Math.max(Number(args.max ?? 60) || 60, 1), 200);
+  const elements = await page.evaluate((maxN) => {
+    const out = [];
+    const seen = new Set();
+    for (const el of document.querySelectorAll("input, textarea, select, button, a[href]")) {
+      if (out.length >= maxN) break;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      const info = {
+        tag: el.tagName.toLowerCase(),
+        type: el.type ?? "",
+        name: el.name ?? "",
+        id: el.id ?? "",
+        placeholder: el.placeholder ?? "",
+        ariaLabel: el.getAttribute("aria-label") ?? "",
+        text: (el.innerText || el.textContent || "").trim().slice(0, 80),
+        href: el.href ?? "",
+        selector:
+          el.id !== ""
+            ? `#${CSS.escape(el.id)}`
+            : el.name !== ""
+              ? `${el.tagName.toLowerCase()}[name="${el.name}"]`
+              : "",
+      };
+      const key = `${info.tag}|${info.name}|${info.id}|${info.placeholder}|${info.text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(info);
+    }
+    return out;
+  }, max);
+  return { count: elements.length, elements };
 }
 
 async function closeTool() {
@@ -599,6 +813,191 @@ function registerTools(ctx, config) {
       execute: () => closeTool(),
     }),
   );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_tabs",
+      description:
+        "管理浏览器多标签页:list 列出所有标签,new 新建(可选带 url),switch 按 id 或 index 切换,close 关闭指定标签。id 来自 list 结果。",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "new", "switch", "close"] },
+          url: { type: "string", description: "new 时打开的新标签 URL。" },
+          id: { type: "integer", description: "目标标签 id(list 返回)。" },
+          index: { type: "integer", description: "目标标签序号(0 起)。" },
+          waitUntil: { type: "string", enum: ["load", "domcontentloaded", "commit"] },
+          timeoutMs: { type: "integer" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          action: { type: "string" },
+          tab: { type: "object" },
+          tabs: { type: "array", items: { type: "object" } },
+          activeId: { type: "integer" },
+        },
+        required: ["action", "tabs", "activeId"],
+      },
+      render: (args, value) => {
+        const lines = value.tabs.map(
+          (t) => `${t.id === value.activeId ? "▶" : " "} #${t.id} ${t.url}${t.title ? ` — ${t.title}` : ""}`,
+        );
+        return `tabs ${value.action}: ${lines.join("\n") || "(none)"}`;
+      },
+      timeoutMs: timeout(),
+      execute: (args) => tabsTool(config, args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_download",
+      description:
+        "获取页面上最近触发的下载(如点击下载链接后),保存到工作区 .dsh-trio/downloads/ 并返回路径。index 可选,默认最近一次;浏览器会话关闭后下载记录丢失。",
+      parameters: {
+        type: "object",
+        properties: {
+          index: { type: "integer", description: "下载记录序号(0 起,默认最近)。" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          path: { type: "string" },
+          filename: { type: "string" },
+          url: { type: "string" },
+          bytes: { type: "integer" },
+        },
+        required: ["path", "filename", "url", "bytes"],
+      },
+      render: (_args, value) => `Downloaded ${value.filename} (${value.bytes} bytes) → ${value.path}`,
+      timeoutMs: timeout(),
+      execute: (args, exec) => downloadTool(config, args, exec),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_cookies",
+      description:
+        "管理浏览器 Cookie:list 列出当前页面域名的 Cookie(默认隐藏值,showValues=true 显示),set 设置一个 Cookie(可指定 url,默认当前页面),clear 清空全部。用于处理登录态。",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "set", "clear"] },
+          url: { type: "string", description: "list 的过滤域名或 set 的归属 URL。" },
+          name: { type: "string", description: "set 时的 Cookie 名。" },
+          value: { type: "string", description: "set 时的 Cookie 值。" },
+          showValues: { type: "boolean" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          cookies: { type: "array", items: { type: "object" } },
+          set: { type: "boolean" },
+          cleared: { type: "boolean" },
+          name: { type: "string" },
+          url: { type: "string" },
+        },
+        required: [],
+      },
+      render: (_args, value) => {
+        if (value.cleared) return "All cookies cleared";
+        if (value.set) return `Cookie ${value.name} set for ${value.url}`;
+        return (value.cookies ?? [])
+          .map((c) => `${c.name}=${c.value} (${c.domain}${c.path}, httpOnly=${c.httpOnly})`)
+          .join("\n") || "(no cookies)";
+      },
+      timeoutMs: timeout(),
+      execute: (args) => cookiesTool(config, args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_form",
+      description:
+        "批量填充表单:fields 数组,每项给 selector(CSS)或 label(可见文本)与 value;submit=true 时填完按回车提交。先 browser_elements 或 browser_snapshot 了解表单结构。",
+      parameters: {
+        type: "object",
+        properties: {
+          fields: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                selector: { type: "string" },
+                label: { type: "string" },
+                value: { type: "string" },
+              },
+            },
+            description: "要填充的字段列表。",
+          },
+          submit: { type: "boolean" },
+          timeoutMs: { type: "integer" },
+        },
+        required: ["fields"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          filled: { type: "array", items: { type: "object" } },
+          submit: { type: "boolean" },
+          url: { type: "string" },
+          title: { type: "string" },
+        },
+        required: ["filled", "submit", "url", "title"],
+      },
+      render: (args, value) =>
+        `Filled ${value.filled.length} field(s)${value.submit ? " and submitted" : ""}\nNow at: ${value.url}`,
+      timeoutMs: timeout(),
+      execute: (args) => formTool(config, args),
+    }),
+  );
+
+  ctx.tools.register(
+    definePlainTool({
+      name: "browser_elements",
+      description:
+        "列出当前页面可交互元素(input/textarea/select/button/链接)的结构化清单:类型、name/id、placeholder、可见文本、可直接用于 browser_click/browser_type 的 CSS 选择器。比 browser_snapshot 更适合定位表单。",
+      parameters: {
+        type: "object",
+        properties: {
+          max: { type: "integer", description: "最多返回多少元素,默认 60。" },
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          count: { type: "integer" },
+          elements: { type: "array", items: { type: "object" } },
+        },
+        required: ["count", "elements"],
+      },
+      render: (_args, value) =>
+        (value.elements ?? [])
+          .map(
+            (e) =>
+              `<${e.tag}${e.type ? ` type=${e.type}` : ""}>${e.name ? ` name=${e.name}` : ""}${e.id ? ` id=${e.id}` : ""}${e.placeholder ? ` ph="${e.placeholder}"` : ""}${e.text ? ` "${e.text.slice(0, 40)}"` : ""}${e.selector ? ` → ${e.selector}` : ""}`,
+          )
+          .join("\n") || "(no interactive elements)",
+      timeoutMs: timeout(),
+      execute: (args) => elementsTool(config, args),
+    }),
+  );
 }
 
 const LIVE_VIEW_HTML = `<!doctype html>
@@ -726,7 +1125,7 @@ export function apply(ctx, rawConfig) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:browser",
     order: 200,
-    text: "浏览器工具(browser_open / browser_snapshot / browser_click / browser_type / browser_eval / browser_screenshot)操作一个共享浏览器会话。打开页面后用 browser_snapshot 读文本与链接,再决定点击/输入;需要用户查看画面时用 browser_screenshot 保存截图并说明路径。",
+    text: "浏览器工具操作一个共享浏览器会话,支持多标签页。打开页面后先用 browser_snapshot 读文本与链接、browser_elements 读表单结构,再决定 browser_click / browser_type / browser_form;标签管理用 browser_tabs;下载用 browser_download;登录态用 browser_cookies;需要用户查看画面时用 browser_screenshot 保存截图并说明路径。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

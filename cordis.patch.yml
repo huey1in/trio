@@ -42,3 +42,7 @@
           - opened
           - synchronize
           - reopened
+
+    - id: trio-console
+      name: dsh-trio/console
+      config: {}

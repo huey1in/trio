@@ -7,6 +7,7 @@ const modules = {
   browser: await import("../src/browser.js"),
   mcp: await import("../src/mcp.js"),
   github: await import("../src/github.js"),
+  console: await import("../src/console.js"),
 };
 
 for (const [key, mod] of Object.entries(modules)) {
@@ -17,7 +18,7 @@ for (const [key, mod] of Object.entries(modules)) {
 }
 
 // MCP 工具表必须齐全
-assert.ok(modules.mcp.MCP_TOOLS?.length >= 4, "mcp: MCP_TOOLS listed");
+assert.ok(modules.mcp.MCP_TOOLS?.length >= 5, "mcp: MCP_TOOLS listed");
 for (const tool of modules.mcp.MCP_TOOLS) {
   assert.equal(typeof tool.name, "string");
   assert.equal(typeof tool.description, "string");
@@ -42,12 +43,13 @@ console.log("✓ github: extractPrRef / verifySignature");
 // YAML patch 基本形状(纯文本检查,避免引入 yaml 依赖)
 import { readFileSync } from "node:fs";
 const patch = readFileSync(new URL("../cordis.patch.yml", import.meta.url), "utf8");
-for (const id of ["trio-browser", "trio-mcp", "trio-github"]) {
+for (const id of ["trio-browser", "trio-mcp", "trio-github", "trio-console"]) {
   assert.ok(patch.includes(`id: ${id}`), `patch contains ${id}`);
 }
 assert.ok(patch.includes("dsh-trio/browser"));
 assert.ok(patch.includes("dsh-trio/mcp"));
 assert.ok(patch.includes("dsh-trio/github"));
-console.log("✓ cordis.patch.yml: three rows");
+assert.ok(patch.includes("dsh-trio/console"));
+console.log("✓ cordis.patch.yml: four rows");
 
 console.log("\n全部通过 ✅");

@@ -31,6 +31,33 @@ const DEFAULT_CONFIG = {
   listSessionsLimit: 50,
 };
 
+/** 活跃的 GET SSE 客户端(用于推送 notifications/progress 等服务器通知)。 */
+const sseWriters = new Set();
+
+/** 向所有已连接 SSE 客户端推送一条 JSON-RPC 通知。 */
+function pushNotification(method, params) {
+  for (const writer of sseWriters) {
+    try {
+      writer.send("message", { jsonrpc: "2.0", method, params });
+    } catch {
+      sseWriters.delete(writer);
+    }
+  }
+}
+
+/** 在 tools/call 执行期间报告进度(仅当客户端带 progressToken)。 */
+function makeProgressReporter(params) {
+  const token = params?._meta?.progressToken;
+  if (token === undefined || token === null) return undefined;
+  let last = -1;
+  return (progress, total, message) => {
+    const rounded = Math.round(progress);
+    if (rounded === last) return;
+    last = rounded;
+    pushNotification("notifications/progress", { progressToken: token, progress: rounded, total, message });
+  };
+}
+
 // ---------------------------------------------------------------------------
 // JSON-RPC 工具
 // ---------------------------------------------------------------------------
@@ -89,7 +116,7 @@ export const MCP_TOOLS = [
   {
     name: "dsh_run_agent",
     description:
-      "用 DSH 的默认模型启动一个一次性 agent 执行任务(prompt),等待其完成并返回最终文本。适合深度研究、代码审查、多步骤任务。耗时可能较长。",
+      "用 DSH 的默认模型启动一个一次性 agent 执行任务(prompt),等待其完成并返回最终文本。适合深度研究、代码审查、多步骤任务。耗时可能较长;若请求带 _meta.progressToken,会通过 notifications/progress 推送进度。",
     inputSchema: {
       type: "object",
       properties: {
@@ -99,6 +126,11 @@ export const MCP_TOOLS = [
       },
       required: ["prompt"],
     },
+  },
+  {
+    name: "dsh_agents_status",
+    description: "列出当前运行中的 DSH agent(会话 id 与状态)。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
@@ -218,7 +250,7 @@ async function searchSessions(ctx, args) {
   return { query: q, hits };
 }
 
-async function runAgent(ctx, args) {
+async function runAgent(ctx, args, onProgress) {
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const defaultModel = ctx.get("agentDefaultModel");
@@ -235,6 +267,7 @@ async function runAgent(ctx, args) {
   }
   const cwd = String(args?.cwd ?? "") || process.cwd();
   const sessionId = `session-${randomUUID()}`;
+  onProgress?.(1, 4, "creating agent");
   const handle = await agents.create({
     sessionId,
     meta: { cwd },
@@ -243,13 +276,16 @@ async function runAgent(ctx, args) {
   try {
     await handle.agent.whenIdle();
     const firstSeq = handle.agent.session.seq;
+    onProgress?.(2, 4, "agent running");
     handle.agent.followup({
       content: [{ type: "text", text: prompt }],
       source: { kind: "user" },
     });
     await handle.agent.whenIdle();
+    onProgress?.(3, 4, "collecting result");
     await sessions.flush(handle.agent.session);
     const outcome = summarize(handle.agent.session.events, firstSeq);
+    onProgress?.(4, 4, "done");
     return {
       sessionId,
       text: truncate(outcome.text, 120000),
@@ -265,7 +301,24 @@ async function runAgent(ctx, args) {
   }
 }
 
-async function callMcpTool(ctx, name, args) {
+async function agentsStatus(ctx) {
+  const agents = ctx.get("agents");
+  if (agents === undefined) throw new Error("agents service unavailable");
+  const list = agents.list();
+  const agentsOut = [];
+  for (const agent of list) {
+    let status = "unknown";
+    try {
+      status = agent.status ?? "unknown";
+    } catch {
+      /* defensive */
+    }
+    agentsOut.push({ sessionId: agent.id, status });
+  }
+  return { agents: agentsOut, count: agentsOut.length };
+}
+
+async function callMcpTool(ctx, name, args, onProgress) {
   switch (name) {
     case "dsh_list_sessions":
       return listSessions(ctx, args);
@@ -274,7 +327,9 @@ async function callMcpTool(ctx, name, args) {
     case "dsh_search_sessions":
       return searchSessions(ctx, args);
     case "dsh_run_agent":
-      return runAgent(ctx, args);
+      return runAgent(ctx, args, onProgress);
+    case "dsh_agents_status":
+      return agentsStatus(ctx);
     default:
       throw new Error(`unknown tool: ${name}`);
   }
@@ -338,8 +393,9 @@ async function handlePost(req, res, ctx, config) {
     case "tools/call": {
       const name = params?.name;
       const args = params?.arguments ?? {};
+      const onProgress = makeProgressReporter(params);
       try {
-        const result = await callMcpTool(ctx, name, args);
+        const result = await callMcpTool(ctx, name, args, onProgress);
         response = rpcResult(id, {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         });
@@ -365,19 +421,22 @@ async function handlePost(req, res, ctx, config) {
   }
 }
 
-// GET: 打开服务器 → 客户端 SSE 流(按协议先发 endpoint 事件;本服务器无主动
-// 通知,之后仅保持连接)。DELETE: 客户端会话结束,无状态实现直接 200。
+// GET: 打开服务器 → 客户端 SSE 流(按协议先发 endpoint 事件;同时注册为
+// 通知通道,run_agent 等长任务通过它推送 notifications/progress)。
+// DELETE: 客户端会话结束,无状态实现直接 200。
 function handleGetWithConfig(req, res, config) {
   if (!checkAuth(req, config)) {
     sendJson(res, 401, rpcError(null, -32001, "Unauthorized"));
     return;
   }
   const writer = openSse(res);
+  sseWriters.add(writer);
   const host = req.headers.host ?? "127.0.0.1";
   writer.send("endpoint", { uri: `http://${host}${config.path}` });
   const keepAlive = setInterval(() => writer.comment("keep-alive"), 15000);
   req.on("close", () => {
     clearInterval(keepAlive);
+    sseWriters.delete(writer);
     writer.close();
   });
 }

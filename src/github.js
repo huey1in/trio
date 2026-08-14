@@ -637,6 +637,153 @@ function registerTools(ctx, config) {
 
   tools.register(
     definePlainTool({
+      name: "github_pr_review_comment",
+      description: "在 PR 的 diff 上发一条行内评论。path 为文件路径,line 为 diff 中的行号(PR 的 diff 行号,不是文件行号);body 为评论内容。",
+      parameters: {
+        type: "object",
+        properties: {
+          owner: { type: "string" },
+          repo: { type: "string" },
+          number: { type: "integer" },
+          body: { type: "string" },
+          path: { type: "string", description: "评论针对的文件路径。" },
+          line: { type: "integer", description: "diff 中的行号。" },
+        },
+        required: ["owner", "repo", "number", "body", "path", "line"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: { type: "integer" },
+          html_url: { type: "string" },
+        },
+        required: ["id", "html_url"],
+      },
+      render: (_args, value) => `Inline comment: ${value.html_url}`,
+      timeoutMs: 30000,
+      execute: async (args) => {
+        const data = await ghFetch(
+          ctx,
+          config,
+          `/repos/${args.owner}/${args.repo}/pulls/${args.number}/comments`,
+          {
+            method: "POST",
+            body: { body: args.body, path: args.path, line: args.line },
+          },
+        );
+        return { id: data.id ?? 0, html_url: data.html_url ?? "" };
+      },
+    }),
+  );
+
+  tools.register(
+    definePlainTool({
+      name: "github_issue_update",
+      description: "更新 issue/PR 的状态、标签、指派、标题或正文。只更新提供的字段。",
+      parameters: {
+        type: "object",
+        properties: {
+          owner: { type: "string" },
+          repo: { type: "string" },
+          issue: { type: "integer", description: "issue 或 PR 编号。" },
+          state: { type: "string", enum: ["open", "closed"] },
+          labels: { type: "array", items: { type: "string" } },
+          assignees: { type: "array", items: { type: "string" } },
+          title: { type: "string" },
+          body: { type: "string" },
+        },
+        required: ["owner", "repo", "issue"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          number: { type: "integer" },
+          state: { type: "string" },
+          title: { type: "string" },
+          html_url: { type: "string" },
+        },
+        required: ["number", "state", "title", "html_url"],
+      },
+      render: (_args, value) => `#${value.number} [${value.state}] ${value.title} — ${value.html_url}`,
+      timeoutMs: 30000,
+      execute: async (args) => {
+        const body = {};
+        if (args.state !== undefined) body.state = args.state;
+        if (args.labels !== undefined) body.labels = args.labels;
+        if (args.assignees !== undefined) body.assignees = args.assignees;
+        if (args.title !== undefined) body.title = args.title;
+        if (args.body !== undefined) body.body = args.body;
+        const data = await ghFetch(ctx, config, `/repos/${args.owner}/${args.repo}/issues/${args.issue}`, {
+          method: "PATCH",
+          body,
+        });
+        return {
+          number: data.number ?? 0,
+          state: data.state ?? "",
+          title: data.title ?? "",
+          html_url: data.html_url ?? "",
+        };
+      },
+    }),
+  );
+
+  tools.register(
+    definePlainTool({
+      name: "github_search_issues",
+      description: "在仓库内搜索 issue 和 PR(支持 GitHub 搜索语法,如 'is:pr is:open bug')。",
+      parameters: {
+        type: "object",
+        properties: {
+          owner: { type: "string" },
+          repo: { type: "string" },
+          query: { type: "string", description: "搜索词,可带 GitHub 限定符。" },
+          limit: { type: "integer" },
+        },
+        required: ["owner", "repo", "query"],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          items: { type: "array", items: { type: "object" } },
+          total: { type: "integer" },
+        },
+        required: ["items", "total"],
+      },
+      render: (_args, value) =>
+        value.items
+          .map((i) => `#${i.number} [${i.state}] ${i.title} (${i.user})`)
+          .join("\n") || "(no results)",
+      timeoutMs: 30000,
+      execute: async (args) => {
+        const limit = Math.min(Math.max(Number(args.limit ?? 20) || 20, 1), 50);
+        const q = `repo:${args.owner}/${args.repo} ${args.query}`;
+        const data = await ghFetch(
+          ctx,
+          config,
+          `/search/issues?q=${encodeURIComponent(q)}&per_page=${limit}`,
+        );
+        return {
+          total: data.total_count ?? 0,
+          items: (data.items ?? []).map((i) => ({
+            number: i.number,
+            title: i.title,
+            state: i.state,
+            user: i.user?.login ?? "",
+            html_url: i.html_url ?? "",
+          })),
+        };
+      },
+    }),
+  );
+
+  tools.register(
+    definePlainTool({
       name: "github_workflow_runs",
       description: "查看仓库最近的工作流(CI)运行状态。",
       parameters: {
