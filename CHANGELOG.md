@@ -1,0 +1,56 @@
+# Changelog
+
+本项目的变更记录。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
+版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+## [1.0.0] - 2026-08-14
+
+### 工程化(0.5.0 起)
+
+- **TypeScript 严格模式**:全部源码迁移至 TS,`tsc -b` 0 错误,发布带 `.d.ts` 类型声明。
+- **测试套件**:vitest 单元测试 47 例,覆盖 HTTP 助手、工具定义、MCP 协议、
+  签名校验、事件投影、配置解析等核心逻辑。
+- **CI/CD**:GitHub Actions 双工作流 —— `ci.yml`(Node 20/22 × typecheck/test/build)
+  与 `release.yml`(打 tag 自动发布 npm + GitHub Release)。
+- **配置校验**:五个模块全部接入轻量 schema 校验器(`lib/config.ts`),
+  非法配置在启动时即报错,附中文说明。
+- **健壮性**:GitHub/GitLab API 幂等 GET 请求自动重试;下载路径目录逃逸防护。
+- **文档与社区**:CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / issue·PR 模板。
+
+### 功能(0.1.0–0.4.0)
+
+- **🧭 浏览器自动化(22 工具)**:多标签、下载、上传、Cookie 管理、表单填充与回放、
+  多配置文件(工作/个人)、登录态持久化(userDataDir)、实时画面页。
+- **🔌 MCP Server**:5 工具 + resources + 流式进度/输出 + OAuth 2.0
+  client_credentials(RFC 8414 discovery)+ 模型覆盖。
+- **🐙 GitHub 集成(13 工具)**:issue/PR 全流程、行内评论、webhook 自动评审(去重)、
+  issue 自动修复闭环(agent 修 → 自动开 PR)、事件看板。
+- **🦊 GitLab 集成(7 工具)**:项目/issue/MR、MR 行内评论、webhook 自动评审。
+- **🎛️ 控制台**:`/trio` 状态页,一页汇总五模块状态与最近事件。
+
+## [0.4.0] - 2026-08-14
+
+- 浏览器:多配置文件(work/personal)、表单保存回放。
+- MCP:OAuth 鉴权、`dsh_run_agent` 流式输出。
+- GitHub:事件看板、评审去重。
+- GitLab:MR 行内评论、webhook 评审。
+
+## [0.3.0] - 2026-08-14
+
+- 浏览器:userDataDir 登录态持久化、`browser_upload`。
+- MCP:resources/list + resources/read、模型覆盖参数。
+- GitHub:issue 自动修复闭环。
+- GitLab 模块上线。
+
+## [0.2.0] - 2026-08-14
+
+- 浏览器:多标签、下载、Cookie、表单填充、元素清单。
+- MCP:进度通知、`dsh_agents_status`。
+- GitHub:行内评论、issue 更新与搜索。
+- 控制台模块上线。
+
+## [0.1.0] - 2026-08-14
+
+- 首个发布:浏览器自动化 + MCP Server + GitHub 集成。

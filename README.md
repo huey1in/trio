@@ -6,6 +6,7 @@
   <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/v/dsh-trio?color=blue" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/dm/dsh-trio" alt="npm downloads"></a>
   <a href="https://github.com/huey1in/trio"><img src="https://img.shields.io/github/stars/huey1in/trio" alt="GitHub stars"></a>
+  <a href="https://github.com/huey1in/trio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/huey1in/trio/ci.yml?label=CI" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/dsh-trio" alt="License: MIT"></a>
   <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/topic-dsh--plugin-1f425f" alt="dsh-plugin"></a>
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
