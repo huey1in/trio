@@ -2,9 +2,17 @@
   <img src="assets/banner-web.jpg" alt="dsh-trio — DeepSeek Harness 全家桶" width="100%">
 </p>
 
-# 🐋 dsh-trio — DeepSeek Harness 全家桶
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/v/dsh-trio?color=blue" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-trio"><img src="https://img.shields.io/npm/dm/dsh-trio" alt="npm downloads"></a>
+  <a href="https://github.com/huey1in/trio"><img src="https://img.shields.io/github/stars/huey1in/trio" alt="GitHub stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/npm/l/dsh-trio" alt="License: MIT"></a>
+  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/topic-dsh--plugin-1f425f" alt="dsh-plugin"></a>
+  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node >= 20"></a>
+</p>
 
-[![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+# 🐋 dsh-trio — DeepSeek Harness 全家桶
 
 **一条命令装三个超能力:浏览器自动化 + MCP Server + GitHub 集成。**
 
