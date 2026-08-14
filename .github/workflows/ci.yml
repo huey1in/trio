@@ -40,7 +40,8 @@ jobs:
         run: npm run build
 
       - name: Verify bundle manifests
-        run: node -e "
+        run: |
+          node -e "
           const pkg = require('./package.json');
           if (!pkg.dsh?.bundle?.patch) throw new Error('missing dsh.bundle.patch');
           const fs = require('fs');
@@ -48,5 +49,5 @@ jobs:
           for (const row of ['trio-browser', 'trio-mcp', 'trio-github', 'trio-gitlab', 'trio-console']) {
             if (!patch.includes('id: ' + row)) throw new Error('missing row ' + row);
           }
-          console.log('✓ bundle manifest ok (5 rows)');
-        "
+          console.log('OK bundle manifest rows');
+          "
