@@ -1,9 +1,9 @@
 // dsh-trio · GitLab 集成
 //
-// 零依赖 GitLab REST API 工具集:
-//   gitlab_project / gitlab_issues / gitlab_issue_create / gitlab_issue_comment /
-//   gitlab_mr_list / gitlab_mr_create / gitlab_mr_inline_comment
+// 3 个只读 GitLab REST API 工具:
+//   gitlab_project / gitlab_issues / gitlab_mr_list
 // + webhook 自动 MR 评审(X-Gitlab-Token 校验,评审结果以 note 提交)。
+// 写操作(建 issue/MR、评论)交给 agent 用 bash + glab CLI。
 //
 // 凭证:DSH credentials 或环境变量中的 tokenEnv(默认 GITLAB_TOKEN),
 // 通过 PRIVATE-TOKEN header 发送。project 参数接受 "owner/repo" 形式。
@@ -88,7 +88,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:gitlab",
     order: 202,
-    text: "GitLab 工具(gitlab_project / gitlab_issues / gitlab_issue_create / gitlab_issue_comment / gitlab_mr_list / gitlab_mr_create / gitlab_mr_inline_comment)通过 GITLAB_TOKEN 访问 GitLab REST API。引用 issue/MR 时给出 !编号与链接。",
+    text: "GitLab 只读工具(gitlab_project / gitlab_issues / gitlab_mr_list)通过 GITLAB_TOKEN 访问 GitLab REST API。写操作(创建 issue/MR、评论)用 bash 配合 glab CLI 或 curl + GITLAB_TOKEN 完成。引用 issue/MR 时给出 !编号与链接。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

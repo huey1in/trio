@@ -1,8 +1,10 @@
 // dsh-trio · GitHub 集成
 //
-// 零依赖 GitHub REST API 工具集 + webhook 自动 PR 评审 + issue 自动修复闭环。
-// 凭证:通过 DSH credentials seam 解析 tokenEnv(默认 GITHUB_TOKEN),找不到时
-// 回退读进程环境变量;webhook 用 HMAC-SHA256 签名校验;评审由 ctx.llm 调用。
+// 4 个只读 GitHub REST API 工具(github_repo / github_issues / github_pulls /
+// github_pr)+ webhook 自动 PR 评审 + issue 自动修复闭环。写操作交给 agent
+// 用 bash + gh CLI。凭证:通过 DSH credentials seam 解析 tokenEnv(默认
+// GITHUB_TOKEN),找不到时回退读进程环境变量;webhook 用 HMAC-SHA256 签名
+// 校验;评审由 ctx.llm 调用。
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext, WebRoute } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
@@ -111,7 +113,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:github",
     order: 201,
-    text: "GitHub 工具(github_repo / github_issues / github_pulls / github_pr / github_pr_review / github_pr_merge / github_workflow_runs)通过 GITHUB_TOKEN 访问 GitHub REST API。引用 PR/issue 时给出 #编号与链接。",
+    text: "GitHub 只读工具(github_repo / github_issues / github_pulls / github_pr)通过 GITHUB_TOKEN 访问 GitHub REST API。写操作(创建 issue/PR、评论、评审、合并)用 bash 配合 gh CLI 或 curl + GITHUB_TOKEN 完成。引用 PR/issue 时给出 #编号与链接。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

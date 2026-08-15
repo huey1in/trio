@@ -1,4 +1,8 @@
-// dsh-trio · GitLab — 工具注册(7 个 gitlab_*)
+// dsh-trio · GitLab — 工具注册(3 个只读 gitlab_*)
+//
+// 瘦身说明:写操作(建 issue/MR、评论)交给 agent 用 bash + glab CLI
+// (或 curl + GITLAB_TOKEN),插件只保留 3 个高频只读工具;
+// 常驻自动化(webhook MR 评审)在 webhook.ts,是 bash 无法替代的部分。
 import type { TrioContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { definePlainTool, genericCard } from "../lib/tools.js";
@@ -94,81 +98,6 @@ export function registerTools(ctx: TrioContext, config: GitlabConfig) {
 
   tools.register(
     definePlainTool({
-      name: "gitlab_issue_create",
-      description: "在 GitLab 项目中创建 issue。",
-      parameters: {
-        type: "object",
-        properties: {
-          project: { type: "string", description: "项目路径,如 'owner/repo'。" },
-          title: { type: "string" },
-          body: { type: "string" },
-        },
-        required: ["project", "title"],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          iid: { type: "integer" },
-          web_url: { type: "string" },
-        },
-        required: ["iid", "web_url"],
-      },
-      render: (_args, value) => `Created !${value.iid}: ${value.web_url}`,
-      timeoutMs: 30000,
-      execute: async (args) => {
-        const data = await glFetch(ctx, config, `/projects/${encodeProject(args.project)}/issues`, {
-          method: "POST",
-          body: { title: args.title, description: args.body ?? "" },
-        });
-        return { iid: data.iid ?? 0, web_url: data.web_url ?? "" };
-      },
-    }),
-  );
-
-  tools.register(
-    definePlainTool({
-      name: "gitlab_issue_comment",
-      description: "在 GitLab issue 或 MR 上发布评论(note)。",
-      parameters: {
-        type: "object",
-        properties: {
-          project: { type: "string", description: "项目路径,如 'owner/repo'。" },
-          iid: { type: "integer", description: "issue 或 MR 的 iid。" },
-          body: { type: "string" },
-        },
-        required: ["project", "iid", "body"],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "integer" },
-          web_url: { type: "string" },
-        },
-        required: ["id", "web_url"],
-      },
-      render: (_args, value) => `Commented: ${value.web_url}`,
-      timeoutMs: 30000,
-      execute: async (args) => {
-        const data = await glFetch(
-          ctx,
-          config,
-          `/projects/${encodeProject(args.project)}/issues/${args.iid}/notes`,
-          {
-            method: "POST",
-            body: { body: args.body },
-          },
-        );
-        return { id: data.id ?? 0, web_url: data.web_url ?? "" };
-      },
-    }),
-  );
-
-  tools.register(
-    definePlainTool({
       name: "gitlab_mr_list",
       description: "列出 GitLab 项目的 Merge Request(state 默认 opened)。",
       parameters: {
@@ -206,108 +135,4 @@ export function registerTools(ctx: TrioContext, config: GitlabConfig) {
       },
     }),
   );
-
-  tools.register(
-    definePlainTool({
-      name: "gitlab_mr_inline_comment",
-      description: "在 MR 的 diff 上发一条行内讨论评论。path 为文件路径,line 为新增行号(new_line)。",
-      parameters: {
-        type: "object",
-        properties: {
-          project: { type: "string", description: "项目路径,如 'owner/repo'。" },
-          iid: { type: "integer", description: "MR 的 iid。" },
-          body: { type: "string" },
-          path: { type: "string", description: "评论针对的文件路径。" },
-          line: { type: "integer", description: "新增行号(new_line)。" },
-        },
-        required: ["project", "iid", "body", "path", "line"],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "integer" },
-          web_url: { type: "string" },
-        },
-        required: ["id", "web_url"],
-      },
-      render: (_args, value) => `Inline comment: ${value.web_url}`,
-      timeoutMs: 30000,
-      execute: async (args) => {
-        const project = encodeProject(args.project);
-        const mr = await glFetch(ctx, config, `/projects/${project}/merge_requests/${args.iid}`);
-        const refs = mr.diff_refs ?? {};
-        const data = await glFetch(
-          ctx,
-          config,
-          `/projects/${project}/merge_requests/${args.iid}/discussions`,
-          {
-            method: "POST",
-            body: {
-              body: args.body,
-              position: {
-                position_type: "text",
-                new_path: args.path,
-                new_line: args.line,
-                base_sha: refs.base_sha ?? "",
-                start_sha: refs.start_sha ?? "",
-                head_sha: refs.head_sha ?? "",
-              },
-            },
-          },
-        );
-        const note = data.notes?.[0] ?? data;
-        return { id: note.id ?? 0, web_url: note.url ?? note.web_url ?? "" };
-      },
-    }),
-  );
-
-  tools.register(
-    definePlainTool({
-      name: "gitlab_mr_create",
-      description: "从 source_branch 向 target_branch 创建 Merge Request。",
-      parameters: {
-        type: "object",
-        properties: {
-          project: { type: "string", description: "项目路径,如 'owner/repo'。" },
-          source_branch: { type: "string" },
-          target_branch: { type: "string" },
-          title: { type: "string" },
-          description: { type: "string" },
-        },
-        required: ["project", "source_branch", "target_branch", "title"],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          iid: { type: "integer" },
-          web_url: { type: "string" },
-        },
-        required: ["iid", "web_url"],
-      },
-      render: (_args, value) => `MR !${value.iid}: ${value.web_url}`,
-      timeoutMs: 30000,
-      execute: async (args) => {
-        const data = await glFetch(
-          ctx,
-          config,
-          `/projects/${encodeProject(args.project)}/merge_requests`,
-          {
-            method: "POST",
-            body: {
-              source_branch: args.source_branch,
-              target_branch: args.target_branch,
-              title: args.title,
-              description: args.description ?? "",
-            },
-          },
-        );
-        return { iid: data.iid ?? 0, web_url: data.web_url ?? "" };
-      },
-    }),
-  );
 }
-

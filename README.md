@@ -24,8 +24,8 @@ dsh plugin --profile web add dsh-trio
 | --- | --- | --- |
 | 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面(缩略图 + 大屏模态框 + **访问历史**) | `browser_*` 工具 × 21 |
 | 🔌 **MCP Server** | 会话/agent 反向暴露,长任务流式输出 + 进度,resources,**OAuth 2.0 鉴权** | `http://127.0.0.1:3080/trio/mcp` |
-| 🐙 **GitHub 集成** | issue/PR 全流程 + webhook 自动评审(去重)+ issue 自动修复闭环 + **事件看板** | `github_*` 工具 × 13 + webhook |
-| 🦊 **GitLab 集成** | 项目/issue/MR(含行内评论)+ **webhook 自动 MR 评审** | `gitlab_*` 工具 × 7 + webhook |
+| 🐙 **GitHub 集成** | webhook 自动评审(去重)+ issue 自动修复闭环 + **事件看板** + 4 个只读工具 | `github_*` 只读工具 × 4 + webhook |
+| 🦊 **GitLab 集成** | 项目/issue/MR 只读 + **webhook 自动 MR 评审** | `gitlab_*` 只读工具 × 3 + webhook |
 | 🐋 **原生嵌入面板** | 注入 DSH 界面右下角:三模块状态 + 浏览器实时画面 + **GitHub 最近事件看板** | 自动注入,无需配置 |
 
 零构建、零配置依赖:`src/` 直接是发布产物,不依赖任何 `@deepseek-ai` 包(版本兼容性最大化),唯一第三方依赖是 `playwright-core`(复用你系统里已装的 Edge/Chrome,不用下载 Chromium)。
@@ -195,13 +195,13 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 | 工具 | 说明 |
 | --- | --- |
 | `github_repo` | 仓库元信息 |
-| `github_issues` / `github_issue_create` / `github_issue_comment` | issue 三板斧 |
-| `github_issue_update` | 更新 issue/PR 状态、标签、指派、标题、正文 |
-| `github_search_issues` | 仓库内 issue/PR 搜索(支持 GitHub 搜索语法) |
-| `github_pulls` / `github_pr` | PR 列表 / 详情(可带文件 diff) |
-| `github_pr_review` / `github_pr_comment` / `github_pr_merge` | 评审/评论/合并 |
-| `github_pr_review_comment` | **diff 行内评论**(path + line) |
-| `github_workflow_runs` | CI 状态 |
+| `github_issues` | issue 列表(state/limit) |
+| `github_pulls` | PR 列表(state/limit) |
+| `github_pr` | PR 详情(可带文件 diff) |
+
+> 只保留 4 个高频**只读**工具。写操作(建 issue/PR、评论、评审、合并、
+> CI 状态等)让 agent 用 bash 跑 `gh` CLI 或 `curl` + `GITHUB_TOKEN` 完成,
+> 与工具层功能等价且更灵活;插件专注 bash 做不到的常驻自动化。
 
 **Webhook 评审去重**:同一 PR 的同一 head commit 只评审一次(`reviewDedupe`,
 默认开启),`synchronize` 推送新 commit 才会触发新一轮评审。
@@ -266,9 +266,12 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 | 工具 | 说明 |
 | --- | --- |
 | `gitlab_project` | 项目信息(星标/fork/issues/默认分支) |
-| `gitlab_issues` / `gitlab_issue_create` / `gitlab_issue_comment` | issue 三件套 |
-| `gitlab_mr_list` / `gitlab_mr_create` | MR 列表(含来源/目标分支)/ 创建 MR |
-| `gitlab_mr_inline_comment` | **MR diff 行内评论**(path + new_line) |
+| `gitlab_issues` | issue 列表(state/limit) |
+| `gitlab_mr_list` | MR 列表(state/limit,含来源/目标分支) |
+
+> 只保留 3 个高频**只读**工具。写操作(建 issue/MR、评论)让 agent 用
+> bash 跑 `glab` CLI 或 `curl` + `GITLAB_TOKEN` 完成;插件专注 bash 做不到
+> 的 webhook 自动评审。
 
 **Webhook 自动 MR 评审**:仓库 Settings → Webhooks 添加
 `http://<机器>:3080/trio/gitlab/webhook`(Secret Token 与

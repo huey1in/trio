@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **GitHub/GitLab 工具瘦身**:CRUD 写工具(建 issue/PR、评论、评审、合并、
+  行内评论、搜索、CI 状态等)全部移除,由 agent 用 bash + `gh`/`glab` CLI
+  完成;只保留 4 个 GitHub 只读工具(github_repo / github_issues /
+  github_pulls / github_pr)与 3 个 GitLab 只读工具(gitlab_project /
+  gitlab_issues / gitlab_mr_list)。常驻自动化(webhook 自动评审、issue
+  自动修复、事件看板)保留不变。
+- **嵌入面板**:隐藏面板与访问历史列表的滚动条(保留滚动,`scrollbar-width`
+  + `::-webkit-scrollbar` 双端)。
+
 ## [1.3.1] - 2026-08-15
 
 ### 新增
