@@ -1,6 +1,6 @@
 {
   "name": "dsh-reef",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "DSH 插件全家桶:浏览器自动化 + MCP Server + GitHub/GitLab 自动评审 + 原生嵌入面板。One install, five modules for DeepSeek Harness: browser automation, an MCP server exposing your agents to any MCP client, GitHub & GitLab automation, and a native in-app panel.",
   "type": "module",
   "main": "./lib/index.mjs",
