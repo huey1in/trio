@@ -8,6 +8,8 @@
 // 历史:0.x 曾提供独立 /trio 控制台页,1.1.0 起与原生嵌入面板功能重叠,
 // 1.2.0 起移除页面,事件看板并入面板,只保留嵌入。
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext, WebRoute } from "./lib/types.js";
 import { sendText } from "./lib/http.js";
@@ -31,11 +33,24 @@ const CONSOLE_SETTING_FIELDS: FieldSpec[] = [
   { key: "path", label: "面板基路径", type: "string", restart: true, defaultValue: "/trio" },
 ];
 
+/** 读取悬浮按钮图标(暗/亮两张),失败返回空串(回退到 🐋 表情)。 */
+function readFabIcon(name: string): string {
+  try {
+    const file = fileURLToPath(new URL(`../assets/icons/${name}`, import.meta.url));
+    return `data:image/png;base64,${readFileSync(file).toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
 function embedJs(base: string): string {
+  const iconDark = readFabIcon("icon-dark.png");
+  const iconLight = readFabIcon("icon-light.png");
   return `(function () {
   "use strict";
   var base = ${JSON.stringify(base)};
   var B = base + "/browser", M = base + "/mcp", G = base + "/github", G2 = base + "/gitlab";
+  var ICON_DARK = ${JSON.stringify(iconDark)}, ICON_LIGHT = ${JSON.stringify(iconLight)};
 
   // —— 挂载(等 body 就绪) ——
   var root = null, btn = null, panel = null, open = false, shot = null, eventsBox = null;
@@ -46,6 +61,7 @@ function embedJs(base: string): string {
     s.textContent = [
       "#dsh-trio-fab{position:fixed;right:16px;bottom:16px;z-index:2147483000;width:40px;height:40px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 16px var(--dsw-alias-bg-mask-2);transition:background .15s ease}",
       "#dsh-trio-fab:hover{background:var(--dsw-alias-button-floating-hover)}",
+      ".trio-fab-icon{width:28px;height:28px;border-radius:7px;object-fit:cover;display:block}",
       "#dsh-trio-panel,#dsh-trio-panel *,.trio-modal-box,.trio-modal-box *{box-sizing:border-box}",
       "#dsh-trio-panel{position:fixed;right:16px;bottom:64px;z-index:2147483000;width:320px;max-height:70vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;display:none;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:0 8px 32px var(--dsw-alias-bg-mask-2);padding:12px}",
       "#dsh-trio-panel::-webkit-scrollbar{display:none}",
@@ -406,7 +422,27 @@ function embedJs(base: string): string {
   function mount() {
     if (root !== null) return;
     css();
-    btn = el("button", null); btn.id = "dsh-trio-fab"; btn.title = "dsh-trio"; btn.textContent = "🐋";
+    btn = el("button", null); btn.id = "dsh-trio-fab"; btn.title = "dsh-trio";
+    // 悬浮按钮图标:跟随 DSH 主题切换暗/亮版本(回退 🐋 表情)。
+    function applyFabTheme() {
+      if (fabImg === null) return;
+      var dark = document.body.getAttribute("data-ds-dark-theme") !== null;
+      fabImg.src = dark ? ICON_DARK : ICON_LIGHT;
+    }
+    var fabImg = null;
+    if (ICON_DARK && ICON_LIGHT) {
+      fabImg = document.createElement("img");
+      fabImg.className = "trio-fab-icon";
+      fabImg.alt = "dsh-trio";
+      btn.appendChild(fabImg);
+      applyFabTheme();
+      try {
+        var obs = new MutationObserver(applyFabTheme);
+        obs.observe(document.body, { attributes: true, attributeFilter: ["data-ds-dark-theme"] });
+      } catch (e) { /* 旧浏览器无 MutationObserver 时保持首帧主题 */ }
+    } else {
+      btn.textContent = "🐋";
+    }
     panel = el("div", null); panel.id = "dsh-trio-panel";
     panel.appendChild(el("div", "trio-head"));
     // 头部只留 MCP 端点小字(方便配置 MCP 客户端)与设置齿轮。
