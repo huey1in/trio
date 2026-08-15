@@ -22,11 +22,11 @@ dsh plugin --profile web add dsh-trio
 
 | 模块 | 做什么 | 端点/工具 |
 | --- | --- | --- |
-| 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面 | `browser_*` 工具 × 22 + 实时画面页 |
+| 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面 | `browser_*` 工具 × 21 + 实时画面页 |
 | 🔌 **MCP Server** | 会话/agent 反向暴露,长任务流式输出 + 进度,resources,**OAuth 2.0 鉴权** | `http://127.0.0.1:3080/trio/mcp` |
 | 🐙 **GitHub 集成** | issue/PR 全流程 + webhook 自动评审(去重)+ issue 自动修复闭环 + **事件看板** | `github_*` 工具 × 13 + webhook |
 | 🦊 **GitLab 集成** | 项目/issue/MR(含行内评论)+ **webhook 自动 MR 评审** | `gitlab_*` 工具 × 7 + webhook |
-| 🎛️ **控制台** | `/trio` 一页汇总模块状态 + **GitHub 最近事件** | `http://127.0.0.1:3080/trio` |
+| 🐋 **原生嵌入面板** | 注入 DSH 界面右下角:三模块状态 + 浏览器实时画面 + **GitHub 最近事件看板** | 自动注入,无需配置 |
 
 零构建、零配置依赖:`src/` 直接是发布产物,不依赖任何 `@deepseek-ai` 包(版本兼容性最大化),唯一第三方依赖是 `playwright-core`(复用你系统里已装的 Edge/Chrome,不用下载 Chromium)。
 
@@ -203,8 +203,8 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 **Webhook 评审去重**:同一 PR 的同一 head commit 只评审一次(`reviewDedupe`,
 默认开启),`synchronize` 推送新 commit 才会触发新一轮评审。
 
-**事件看板**:控制台 `/trio` 的 GitHub 卡片下方实时展示最近 webhook 事件
-(时间/类型/仓库/编号/处理结果),数据源 `GET /trio/github/events`。
+**事件看板**:DSH 界面右下角嵌入面板的 GitHub 行实时显示最近 webhook 事件
+(最近 3 条:时间/类型/仓库/编号/处理结果,共 N 条),数据源 `GET /trio/github/events`。
 
 ### Webhook 自动评审
 
@@ -274,15 +274,15 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 
 自建 GitLab 实例:改 `apiBase`(如 `https://gitlab.example.com/api/v4`)。
 
-## 🎛️ 控制台
+## 🐋 原生嵌入面板
 
-浏览器打开 `http://127.0.0.1:3080/trio`:
+安装后自动注入 DSH 界面(无需配置,基于官方 `--dsw-alias-*` 设计变量,自适应亮/暗主题):
 
-- **浏览器卡**:开/关状态、标签数、当前 URL,一键跳转实时画面
-- **MCP 卡**:端点协议版本、工具数量、一键"测试连接"
-- **GitHub 卡**:webhook 端点在线状态 + 配置指引
+- **浏览器行**:开关状态、标签数、当前 URL,面板展开时显示实时画面,一键跳转实时画面页
+- **MCP 行**:在线状态,面板头部直接给出 MCP 端点 URL 便于配置客户端
+- **GitHub 行**:webhook 在线状态 + **最近事件看板**(最近 3 条 + 总数)
 
-页面每 5 秒自动刷新,样式与 banner 同源的 anthropic.com 人文简朴风。
+面板每 5 秒自动刷新。不想注入?给 `trio-console` 行加 `config: { enabled: false }`。
 
 ## 开发与测试
 
@@ -314,14 +314,14 @@ npm publish   # 纯 JS 无构建步骤,lib 即源码,无需 prepare 脚本/allow
 - [x] 浏览器:多标签页、下载、Cookie 登录态、表单自动填充 ✅(0.2.0)
 - [x] MCP:`dsh_run_agent` 流式进度通知 ✅(0.2.0)
 - [x] GitHub:PR 行内评论、issue 更新与搜索 ✅(0.2.0)
-- [x] `/trio` 控制台 ✅(0.2.0)
+- [x] `/trio` 控制台 ✅(0.2.0);1.2.0 起并入原生嵌入面板,独立页移除
 - [x] 浏览器:登录态持久化(userDataDir)、`browser_upload` 文件上传 ✅(0.3.0)
 - [x] MCP:`resources/` 支持、`dsh_run_agent` 模型覆盖参数 ✅(0.3.0)
 - [x] GitHub:issue 自动修复闭环(webhook → 子 agent 修 → 开 PR)✅(0.3.0)
 - [x] GitLab 支持 ✅(0.3.0)
 - [x] 浏览器:多配置文件(工作/个人)、表单保存回放 ✅(0.4.0)
 - [x] MCP:OAuth 鉴权(client_credentials + RFC 8414)、流式输出推送 ✅(0.4.0)
-- [x] GitHub:webhook 事件看板(控制台内)、评审缓存去重 ✅(0.4.0)
+- [x] GitHub:webhook 事件看板(嵌入面板内)、评审缓存去重 ✅(0.4.0)
 - [x] GitLab:MR 行内评论、webhook 评审 ✅(0.4.0)
 - [ ] 浏览器:表单值加密存储(敏感字段)、录制回放(动作序列)
 - [ ] MCP:`dsh_run_agent` 可取消(progress 上报 + cancel)、会话续跑
