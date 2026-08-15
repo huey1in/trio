@@ -44,8 +44,7 @@ function embedJs(base: string): string {
       "#dsh-trio-panel::-webkit-scrollbar{display:none}",
       "#dsh-trio-panel.open{display:flex}",
       ".trio-head{display:flex;align-items:center;gap:8px}",
-      ".trio-title{flex:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}",
-      ".trio-caption{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      ".trio-caption{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
       ".trio-row{display:flex;align-items:center;gap:8px;padding:6px 0}",
       ".trio-dot{width:8px;height:8px;border-radius:999px;background:var(--dsw-alias-label-dimmed);flex:none}",
       ".trio-dot.ok{background:var(--dsw-alias-state-success-primary)}",
@@ -270,8 +269,7 @@ function embedJs(base: string): string {
     btn = el("button", null); btn.id = "dsh-trio-fab"; btn.title = "dsh-trio"; btn.textContent = "🐋";
     panel = el("div", null); panel.id = "dsh-trio-panel";
     panel.appendChild(el("div", "trio-head"));
-    var title = el("span", "trio-title", "dsh-trio"); panel.firstChild.appendChild(title);
-    // 头部小字直接给出 MCP 端点,方便配置 MCP 客户端。
+    // 头部只留 MCP 端点小字(方便配置 MCP 客户端)与设置齿轮。
     panel.firstChild.appendChild(el("span", "trio-caption", location.origin + M));
     var gear = el("button", "trio-gear", "⚙"); gear.title = "设置(token 等)";
     gear.addEventListener("click", function () {

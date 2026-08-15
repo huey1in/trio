@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-15
+
 ### 新增
 
 - **面板设置区(⚙)**:GitHub/GitLab token 可直接在嵌入面板里配置,写入 DSH
@@ -25,8 +27,9 @@
   github_pulls / github_pr)与 3 个 GitLab 只读工具(gitlab_project /
   gitlab_issues / gitlab_mr_list)。常驻自动化(webhook 自动评审、issue
   自动修复、事件看板)保留不变。
-- **嵌入面板**:隐藏面板与访问历史列表的滚动条(保留滚动,`scrollbar-width`
-  + `::-webkit-scrollbar` 双端)。
+- **嵌入面板视觉**:隐藏面板与访问历史列表的滚动条(保留滚动,`scrollbar-width`
+  + `::-webkit-scrollbar` 双端);移除面板头部的 "dsh-trio" 标题,头部只留
+  MCP 端点与设置齿轮。
 
 ## [1.3.1] - 2026-08-15
 
