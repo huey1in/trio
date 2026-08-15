@@ -29,11 +29,12 @@ function embedJs(base: string): string {
   return `(function () {
   "use strict";
   var base = ${JSON.stringify(base)};
-  var B = base + "/browser", M = base + "/mcp", G = base + "/github";
+  var B = base + "/browser", M = base + "/mcp", G = base + "/github", G2 = base + "/gitlab";
 
   // —— 挂载(等 body 就绪) ——
   var root = null, btn = null, panel = null, open = false, shot = null, eventsBox = null;
   var modal = null, mTitle = null, mShot = null, mHistory = null, mEmpty = null, modalOpen = false;
+  var settingsBox = null, settingsOpen = false, setRows = {};
   function css() {
     var s = document.createElement("style");
     s.textContent = [
@@ -76,6 +77,22 @@ function embedJs(base: string): string {
       ".trio-history a:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       ".trio-history .t{color:var(--dsw-alias-label-tertiary);flex:none}",
       ".trio-history .u{overflow:hidden;text-overflow:ellipsis}",
+      ".trio-gear{width:28px;height:28px;flex:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:1}",
+      ".trio-gear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".trio-settings{display:none;flex-direction:column;gap:8px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:8px}",
+      ".trio-settings.on{display:flex}",
+      ".trio-settings-title{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      ".trio-setrow{display:flex;flex-direction:column;gap:4px}",
+      ".trio-sethead{display:flex;align-items:center;gap:8px}",
+      ".trio-setlabel{flex:1;color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5}",
+      ".trio-setstatus{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      ".trio-setinput{width:100%;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}",
+      ".trio-setinput:focus{outline:none;border-color:var(--dsw-alias-label-primary)}",
+      ".trio-setinput:disabled{opacity:.5;cursor:not-allowed}",
+      ".trio-setbtns{display:flex;gap:8px}",
+      ".trio-setbtn{flex:1;height:26px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}",
+      ".trio-setbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".trio-setbtn:disabled{opacity:.5;cursor:default}",
     ].join("\\n");
     document.head.appendChild(s);
   }
@@ -111,6 +128,71 @@ function embedJs(base: string): string {
       ));
       eventsBox.appendChild(line);
     }
+  }
+  // —— 设置区:GitHub / GitLab token 配置(写 DSH credentials 库,不回显) ——
+  function setEnabled(row, on) {
+    row.input.disabled = !on;
+    row.save.disabled = !on;
+    row.clear.disabled = !on;
+  }
+  function fetchTokenStatus(key, row) {
+    var url = (key === "github" ? G : G2) + "/settings";
+    probe(url).then(function (r) {
+      if (!r.ok) { row.status.textContent = "模块未启用"; setEnabled(row, false); return; }
+      var s = JSON.parse(r.body);
+      var text = s.configured
+        ? "已配置(" + (s.source === "env" ? "环境变量" : "凭据库") + ")"
+        : "未配置";
+      row.status.textContent = text;
+      setEnabled(row, s.writable !== false);
+    }).catch(function () { row.status.textContent = "连接失败"; setEnabled(row, false); });
+  }
+  function refreshSettings() {
+    for (var key in setRows) fetchTokenStatus(key, setRows[key]);
+  }
+  function saveToken(key, row, value) {
+    var url = (key === "github" ? G : G2) + "/settings";
+    probe(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: value }) }).then(function (r) {
+      if (r.ok) {
+        row.status.textContent = value === "" ? "已清除 ✓" : "已保存 ✓";
+        row.input.value = "";
+        setTimeout(refreshSettings, 600);
+      } else {
+        var msg = "HTTP " + r.status;
+        try { var e = JSON.parse(r.body); if (e && e.error) msg = e.error; } catch (ignore) {}
+        row.status.textContent = "保存失败: " + msg;
+      }
+    }).catch(function () { row.status.textContent = "连接失败"; });
+  }
+  function buildSettingsRow(key, labelText) {
+    var row = el("div", "trio-setrow");
+    var head = el("div", "trio-sethead");
+    head.appendChild(el("span", "trio-setlabel", labelText));
+    var status = el("span", "trio-setstatus", "…");
+    head.appendChild(status);
+    var input = document.createElement("input");
+    input.type = "password";
+    input.className = "trio-setinput";
+    input.placeholder = "粘贴 token(仅存 DSH 凭据库,不回显)";
+    input.autocomplete = "new-password";
+    input.spellcheck = false;
+    var btns = el("div", "trio-setbtns");
+    var save = el("button", "trio-setbtn", "保存");
+    var clear = el("button", "trio-setbtn", "清除");
+    save.addEventListener("click", function () { saveToken(key, setRows[key], input.value); });
+    clear.addEventListener("click", function () { saveToken(key, setRows[key], ""); });
+    btns.appendChild(save); btns.appendChild(clear);
+    row.appendChild(head); row.appendChild(input); row.appendChild(btns);
+    var entry = { status: status, input: input, save: save, clear: clear };
+    setRows[key] = entry;
+    setEnabled(entry, false);
+    return row;
+  }
+  function buildSettings() {
+    settingsBox = el("div", "trio-settings");
+    settingsBox.appendChild(el("div", "trio-settings-title", "凭据设置 · 写入 DSH 凭据库(.credentials.yaml),保存即时生效"));
+    settingsBox.appendChild(buildSettingsRow("github", "GitHub Token (GITHUB_TOKEN)"));
+    settingsBox.appendChild(buildSettingsRow("gitlab", "GitLab Token (GITLAB_TOKEN)"));
   }
   // —— 大屏模态框:点面板缩略图打开,2 秒轮询实时画面 + 访问历史 ——
   function renderHistory(list) {
@@ -191,13 +273,21 @@ function embedJs(base: string): string {
     var title = el("span", "trio-title", "dsh-trio"); panel.firstChild.appendChild(title);
     // 头部小字直接给出 MCP 端点,方便配置 MCP 客户端。
     panel.firstChild.appendChild(el("span", "trio-caption", location.origin + M));
+    var gear = el("button", "trio-gear", "⚙"); gear.title = "设置(token 等)";
+    gear.addEventListener("click", function () {
+      settingsOpen = !settingsOpen;
+      settingsBox.className = settingsOpen ? "trio-settings on" : "trio-settings";
+      if (settingsOpen) refreshSettings();
+    });
+    panel.firstChild.appendChild(gear);
     function row(id) { var r = el("div", "trio-row"); var d = el("span", "trio-dot"); r.appendChild(d); var l = el("span", "trio-label", id); r.appendChild(l); var v = el("span", "trio-value", "—"); r.appendChild(v); return { row: r, dot: d, value: v }; }
     var rB = row("浏览器"), rM = row("MCP"), rG = row("GitHub");
     shot = el("img", "trio-shot"); shot.alt = "browser";
     shot.addEventListener("click", openModal); // 点缩略图 → 大屏模态框
     eventsBox = el("div", "trio-events");
+    buildSettings();
     panel.appendChild(rB.row); panel.appendChild(rM.row); panel.appendChild(rG.row);
-    panel.appendChild(shot); panel.appendChild(eventsBox);
+    panel.appendChild(shot); panel.appendChild(eventsBox); panel.appendChild(settingsBox);
     btn.addEventListener("click", function () { open = !open; panel.className = open ? "open" : ""; panel.id = "dsh-trio-panel"; });
     root = document.createElement("div");
     root.appendChild(btn); root.appendChild(panel);

@@ -16,6 +16,7 @@ import { registerTools } from "./tools.js";
 import { handleWebhook, extractMrRef, verifyToken } from "./webhook.js";
 import { encodeProject, projectMr, projectIssue } from "./api.js";
 import { sendText, sendJson, urlPath } from "../lib/http.js";
+import { registerCredentialSettings } from "../lib/credentials.js";
 
 export type { GitlabConfig } from "./types.js";
 export { extractMrRef, verifyToken } from "./webhook.js";
@@ -68,9 +69,17 @@ function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
       });
     },
   });
+  // 凭据设置端点:面板里配置 GITLAB_TOKEN(写入 DSH credentials 库)。
+  const disposeSettings = registerCredentialSettings(
+    ctx,
+    base.replace(/\/webhook$/, ""),
+    config.tokenEnv ?? "GITLAB_TOKEN",
+    "GitLab",
+  );
   ctx.effect(() => () => {
     try {
       dispose();
+      disposeSettings();
     } catch {
       /* ignore */
     }

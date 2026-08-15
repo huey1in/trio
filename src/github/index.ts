@@ -15,6 +15,7 @@ import { handleWebhook, verifySignature, extractPrRef, recentEvents } from "./we
 import { extractIssueRef } from "./autofix.js";
 import { buildReviewPrompt } from "./review.js";
 import { projectIssue, projectPr } from "./api.js";
+import { registerCredentialSettings } from "../lib/credentials.js";
 
 export type { GithubConfig } from "./types.js";
 export { verifySignature, extractPrRef } from "./webhook.js";
@@ -79,7 +80,7 @@ function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
       });
     },
   });
-  // 事件看板数据源:最近 webhook 事件(供 /trio 控制台展示)
+  // 事件看板数据源:最近 webhook 事件(供面板展示)
   const eventsPath = `${base.replace(/\/webhook$/, "")}/events`;
   const disposeEvents = webServer.register({
     kind: "exact",
@@ -92,10 +93,18 @@ function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
       sendJson(res, 200, { events: recentEvents });
     },
   });
+  // 凭据设置端点:面板里配置 GITHUB_TOKEN(写入 DSH credentials 库)。
+  const disposeSettings = registerCredentialSettings(
+    ctx,
+    base.replace(/\/webhook$/, ""),
+    config.tokenEnv ?? "GITHUB_TOKEN",
+    "GitHub",
+  );
   ctx.effect(() => () => {
     try {
       dispose();
       disposeEvents();
+      disposeSettings();
     } catch {
       /* ignore */
     }

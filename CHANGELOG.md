@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **面板设置区(⚙)**:GitHub/GitLab token 可直接在嵌入面板里配置,写入 DSH
+  凭据库(`$DSH_HOME/.credentials.yaml`,0600),保存即时生效、无需重启;
+  状态只回"已配置(凭据库/环境变量)/未配置",凭据值永不回传页面。
+  新增端点 `GET/POST /trio/github/settings` 与 `/trio/gitlab/settings`
+  (复用 `ctx.credentials` 服务,ref 固定为模块 tokenEnv,客户端不能指定
+  任意 ref)。附带输入校验单元测试。
+
 ### 变更
 
 - **GitHub 只读工具免 token**:github_repo / github_issues / github_pulls /
