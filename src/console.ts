@@ -295,6 +295,9 @@ function embedJs(base: string): string {
     for (var i = 0; i < sec.entries.length; i++) {
       var entry = sec.entries[i];
       var f = entry.field;
+      // 只提交与初始值不同的字段:避免把未改动的默认值"冻结"成覆盖
+      // (否则改名/默认值调整后,旧默认会一直生效)。
+      if (currentFieldValue(entry) === entry.initial) continue;
       if (f.type === "password") {
         if (entry.input.value) fields[f.key] = entry.input.value;
         continue;
