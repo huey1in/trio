@@ -1,19 +1,17 @@
 // dsh-trio · MCP — Streamable HTTP 协议层(JSON-RPC 分发、鉴权、SSE)
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
+import type { TrioContext } from "../lib/types.js";
 import type { McpConfig, ProgressFn, DeltaFn } from "./types.js";
 import { readJsonBody, sendJson, sendText, openSse, urlPath, type SseWriter } from "../lib/http.js";
 import { MCP_TOOLS } from "./tools.js";
 import { resourcesList, resourcesRead } from "./sessions.js";
+import { callMcpTool } from "./dispatch.js";
+import { handleOAuthToken, oauthMetadata, isOAuthEnabled, checkOAuthToken } from "./oauth.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_NAME = "dsh-trio-mcp";
-const SERVER_VERSION = "0.3.0";
-import { callMcpTool } from "./dispatch.js";
-import { handleOAuthToken, oauthMetadata, isOAuthEnabled, checkOAuthToken, oauthClientCredentials } from "./oauth.js";
+const SERVER_VERSION = "1.0.1";
 const sseWriters = new Set<SseWriter>();
-/** OAuth client_credentials 签发的 token → 过期时间戳(ms)。 */
-const oauthTokens = new Map();
 
 /** 向所有已连接 SSE 客户端推送一条 JSON-RPC 通知。 */
 export function pushNotification(method: string, params: Record<string, unknown>) {
@@ -226,7 +224,7 @@ export function handleGetWithConfig(req: IncomingMessage, res: ServerResponse, c
   const writer = openSse(res);
   sseWriters.add(writer);
   const host = req.headers.host ?? "127.0.0.1";
-  writer.send("endpoint", { uri: `http://${host}${config.path}` });
+  writer.send("endpoint", { uri: `http://${host}${config.path ?? "/trio/mcp"}` });
   const keepAlive = setInterval(() => writer.comment("keep-alive"), 15000);
   req.on("close", () => {
     clearInterval(keepAlive);

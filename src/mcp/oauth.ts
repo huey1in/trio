@@ -3,9 +3,9 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpConfig } from "./types.js";
 import { readRawBody, sendJson } from "../lib/http.js";
-const oauthTokens = new Map();
 
-/** 向所有已连接 SSE 客户端推送一条 JSON-RPC 通知。 */
+/** OAuth client_credentials 签发的 token → 过期时间戳(ms)。 */
+const oauthTokens = new Map<string, number>();
 
 export function isOAuthEnabled(config: McpConfig): boolean {
   return config.oauthEnabled === true;

@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-15
+
+### 修复
+
+- **构建产物扁平化**:tsdown 入口改为 name→path 映射,输出 `lib/browser.mjs`
+  等扁平文件,与 `exports` 映射一致(拆分后产物落在子目录导致
+  `dsh-trio/browser` 等子路径解析失败,插件无法加载)。
+- **控制台探测路径**:页面在无尾斜杠 URL(`/trio`)下相对路径解析错位导致
+  三个模块误报"模块未启用";全部改为基于 `location.pathname` 的绝对路径,
+  并补全 MCP/GitHub 端点展示与实时画面链接。
+- **MCP 协议层清理**:移除重复的 `oauthTokens` 定义、更新 `SERVER_VERSION`、
+  GET 端点 URI 兜底。
+- **CI 修复**:`.gitignore` 的 `lib/` 锚定为 `/lib/`(`src/lib/` 源码此前未被
+  跟踪,干净环境构建失败);workflow YAML 改用字面块;pnpm 固定 10;Node 引擎
+  与矩阵对齐为 22/24。
+
 ## [0.5.1] - 2026-08-14
 
 ### 重构

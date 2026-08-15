@@ -67,7 +67,7 @@ const CONSOLE_HTML = `<!doctype html>
     <div class="row"><span class="k">状态</span><span class="v" id="b-status">探测中…</span></div>
     <div class="row"><span class="k">标签页</span><span class="v" id="b-tabs">-</span></div>
     <div class="row"><span class="k">当前页面</span><span class="v" id="b-url">-</span></div>
-    <a class="btn" id="b-link" href="javascript:void(0)" target="_blank" onclick="this.href = location.pathname.replace(/\/+$/, '') + '/browser'; return true;">打开实时画面 ↗</a>
+    <a class="btn" id="b-link" href="#" target="_blank">打开实时画面 ↗</a>
   </section>
 
   <section class="card">
@@ -104,6 +104,10 @@ const CONSOLE_HTML = `<!doctype html>
     } catch (e) { return { ok: false, status: 0, body: String(e) }; }
   }
   async function refresh() {
+    // 初始化链接与端点展示(避免 javascript: URL 被拦截)
+    $('b-link').href = base + '/browser';
+    $('m-url').textContent = location.origin + mUrl;
+    $('g-url').textContent = location.origin + gUrl;
     // 浏览器
     const b = await probe(bUrl);
     if (b.ok) {
