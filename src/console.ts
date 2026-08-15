@@ -295,6 +295,7 @@ function embedJs(base: string): string {
       var status = el("span", "trio-setstatus", "…");
       head.appendChild(status);
       var save = el("button", "trio-setbtn-save", "保存");
+      head.appendChild(save);
       var body = el("div", "trio-setbody");
       box.appendChild(head);
       box.appendChild(body);
