@@ -2,6 +2,10 @@
 //
 // 一个汇总三个模块状态的迷你控制台页。零模块耦合:页面 JS 通过同源 fetch
 // 探测各模块端点是否存在/可用。样式呼应 banner 的 anthropic.com 人文简朴风。
+//
+// 另有原生 webui 嵌入:/trio/embed.js 通过 webServer.tapIndex 注入到 DSH
+// index.html,在原生界面上渲染右下角浮动面板(模块状态 + 浏览器实时画面),
+// 全部 fixed 定位、只读官方 CSS 变量,不依赖官方 DOM 结构。
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext, WebRoute } from "./lib/types.js";
@@ -186,10 +190,146 @@ const CONSOLE_HTML = `<!doctype html>
 </body>
 </html>`;
 
+// ---------------------------------------------------------------------------
+// 原生 webui 嵌入:右下角浮动面板(严格使用官方 --dsw-alias-* 设计变量)
+// ---------------------------------------------------------------------------
+
+function embedJs(base: string): string {
+  return `(function () {
+  "use strict";
+  var base = ${JSON.stringify(base)};
+  var B = base + "/browser", M = base + "/mcp", G = base + "/github";
+
+  // —— 挂载(等 body 就绪) ——
+  var root = null, btn = null, panel = null, open = false, shot = null;
+  function css() {
+    var s = document.createElement("style");
+    s.textContent = [
+      "#dsh-trio-fab{position:fixed;right:16px;bottom:16px;z-index:2147483000;width:40px;height:40px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 16px var(--dsw-alias-bg-mask-2);transition:background .15s ease}",
+      "#dsh-trio-fab:hover{background:var(--dsw-alias-button-floating-hover)}",
+      "#dsh-trio-panel{position:fixed;right:16px;bottom:64px;z-index:2147483000;width:320px;max-height:70vh;overflow-y:auto;display:none;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:0 8px 32px var(--dsw-alias-bg-mask-2);padding:12px}",
+      "#dsh-trio-panel.open{display:flex}",
+      ".trio-head{display:flex;align-items:center;gap:8px}",
+      ".trio-title{flex:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}",
+      ".trio-caption{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      ".trio-row{display:flex;align-items:center;gap:8px;padding:6px 0}",
+      ".trio-dot{width:8px;height:8px;border-radius:999px;background:var(--dsw-alias-label-dimmed);flex:none}",
+      ".trio-dot.ok{background:var(--dsw-alias-state-success-primary)}",
+      ".trio-dot.bad{background:var(--dsw-alias-state-error-primary)}",
+      ".trio-label{flex:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+      ".trio-value{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}",
+      ".trio-shot{width:100%;display:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}",
+      ".trio-shot.on{display:block}",
+      ".trio-actions{display:flex;gap:8px;padding-top:4px}",
+      ".trio-link{flex:1;height:28px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1.5;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none}",
+      ".trio-link:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+    ].join("\\n");
+    document.head.appendChild(s);
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function probe(url, opts) {
+    return fetch(url, Object.assign({ cache: "no-store" }, opts || {}))
+      .then(function (r) { return r.text().then(function (t) { return { ok: r.ok, status: r.status, body: t }; }); })
+      .catch(function (e) { return { ok: false, status: 0, body: String(e) }; });
+  }
+  function mount() {
+    if (root !== null) return;
+    css();
+    btn = el("button", null); btn.id = "dsh-trio-fab"; btn.title = "dsh-trio"; btn.textContent = "🐋";
+    panel = el("div", null); panel.id = "dsh-trio-panel";
+    panel.appendChild(el("div", "trio-head"));
+    var title = el("span", "trio-title", "dsh-trio"); panel.firstChild.appendChild(title);
+    panel.firstChild.appendChild(el("span", "trio-caption", "browser · mcp · github"));
+    function row(id) { var r = el("div", "trio-row"); var d = el("span", "trio-dot"); r.appendChild(d); var l = el("span", "trio-label", id); r.appendChild(l); var v = el("span", "trio-value", "—"); r.appendChild(v); return { row: r, dot: d, value: v }; }
+    var rB = row("浏览器"), rM = row("MCP"), rG = row("GitHub");
+    shot = el("img", "trio-shot"); shot.alt = "browser";
+    var actions = el("div", "trio-actions");
+    var aShot = el("a", "trio-link", "实时画面"); aShot.href = B; aShot.target = "_blank";
+    var aPanel = el("a", "trio-link", "控制台"); aPanel.href = base; aPanel.target = "_blank";
+    actions.appendChild(aShot); actions.appendChild(aPanel);
+    panel.appendChild(rB.row); panel.appendChild(rM.row); panel.appendChild(rG.row);
+    panel.appendChild(shot); panel.appendChild(actions);
+    btn.addEventListener("click", function () { open = !open; panel.className = open ? "open" : ""; panel.id = "dsh-trio-panel"; });
+    root = document.createElement("div");
+    root.appendChild(btn); root.appendChild(panel);
+    document.body.appendChild(root);
+    function refresh() {
+      probe(B + "/status").then(function (b) {
+        if (b.ok) { var s = JSON.parse(b.body); rB.dot.className = "trio-dot " + (s.open ? "ok" : "bad"); rB.value.textContent = s.open ? (s.tabs + " 标签 · " + (s.url || "").slice(0, 24)) : "未打开"; }
+        else { rB.dot.className = "trio-dot bad"; rB.value.textContent = "未启用"; }
+      }).catch(function () {});
+      probe(M, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }).then(function (m) {
+        if (m.ok && m.body.indexOf("dsh-trio-mcp") !== -1) { rM.dot.className = "trio-dot ok"; rM.value.textContent = "在线"; }
+        else { rM.dot.className = "trio-dot bad"; rM.value.textContent = "未启用"; }
+      }).catch(function () {});
+      probe(G + "/webhook", { method: "POST", headers: { "content-type": "application/json", "x-github-event": "ping" }, body: JSON.stringify({ zen: "x" }) }).then(function (g) {
+        if (g.status === 202 || g.status === 200) { rG.dot.className = "trio-dot ok"; rG.value.textContent = "就绪"; }
+        else if (g.status === 401) { rG.dot.className = "trio-dot ok"; rG.value.textContent = "在线(签名)"; }
+        else { rG.dot.className = "trio-dot bad"; rG.value.textContent = "未启用"; }
+      }).catch(function () {});
+      if (open) {
+        probe(B + "/status").then(function (b) {
+          if (b.ok) { var s = JSON.parse(b.body); if (s.open) { shot.className = "trio-shot on"; shot.src = B + "/screenshot?v=" + Date.now(); } else { shot.className = "trio-shot"; } }
+        }).catch(function () {});
+      }
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  }
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount);
+})();`;
+}
+
+/** 原生 UI 注入:exact 路由提供 embed.js + tapIndex 注入 script 标签。 */
+function registerEmbed(
+  webServer: { register(route: WebRoute): () => void; tapIndex(transform: (html: string) => string): () => void },
+  base: string,
+): () => void {
+  const embedPath = `${base}/embed.js`;
+  const script = embedJs(base);
+  const disposeRoute = webServer.register({
+    kind: "exact",
+    path: embedPath,
+    handler: (req: IncomingMessage, res: ServerResponse) => {
+      if ((req.method ?? "GET") !== "GET") {
+        sendText(res, 405, "method not allowed");
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "no-store",
+        "content-length": Buffer.byteLength(script),
+      });
+      res.end(script);
+    },
+  });
+  const scriptTag = `<script src="${embedPath}" defer></script>`;
+  const disposeTap = webServer.tapIndex((html) => {
+    if (html.includes("dsh-trio")) return html; // 已注入
+    const idx = html.lastIndexOf("</head>");
+    if (idx === -1) return html;
+    return `${html.slice(0, idx)}${scriptTag}${html.slice(idx)}`;
+  });
+  return () => {
+    try {
+      disposeRoute();
+      disposeTap();
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const config = resolveConfig("console", CONSOLE_SCHEMA, DEFAULT_CONFIG, rawConfig);
   if (typeof config.enabled === "boolean" && !config.enabled) return;
-  const webServer = ctx.get("webServer");
+  const webServer = ctx.get<{ register(route: WebRoute): () => void; tapIndex(transform: (html: string) => string): () => void; port?: number }>("webServer");
   if (webServer === undefined) return;
   const base = config.path.replace(/\/+$/, "");
   const dispose = webServer.register({
@@ -204,9 +344,11 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
       sendText(res, 404, "not found");
     },
   });
+  const disposeEmbed = registerEmbed(webServer, base);
   ctx.effect(() => () => {
     try {
       dispose();
+      disposeEmbed();
     } catch {
       /* ignore */
     }
@@ -214,5 +356,6 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const port = webServer.port;
   if (typeof port === "number") {
     ctx.logger?.info?.(`dsh-trio/console: control panel at http://127.0.0.1:${port}${base}`);
+    ctx.logger?.info?.(`dsh-trio/console: native UI widget injected (embed script ${base}/embed.js)`);
   }
 }

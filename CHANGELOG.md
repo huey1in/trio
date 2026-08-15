@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-15
+
+### 新增
+
+- **原生 Web UI 嵌入**:通过 `webServer.tapIndex` 向 DSH index.html 注入
+  `/trio/embed.js`,在原生界面右下角渲染 dsh-trio 浮动面板(浏览器/MCP/
+  GitHub 三模块状态 + 浏览器实时画面 + 跳转入口)。零依赖原生 JS,
+  不依赖官方 DOM 结构;样式严格使用官方 `--dsw-alias-*` 设计变量,
+  自动适配亮/暗主题。独立 `/trio` 控制台页保留。
+
 ## [1.0.1] - 2026-08-15
 
 ### 修复
