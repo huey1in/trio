@@ -85,10 +85,9 @@ function embedJs(base: string): string {
       ".trio-history .u{overflow:hidden;text-overflow:ellipsis}",
       ".trio-gear{width:28px;height:28px;flex:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:1}",
       ".trio-gear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
-      // 设置区:grid-template-rows 0fr→1fr 实现向下延伸的过渡动画(精确到内容高度)。
-      ".trio-settings{display:grid;grid-template-rows:0fr;opacity:0;overflow:hidden;transition:grid-template-rows .3s ease,opacity .24s ease}",
-      ".trio-settings.on{grid-template-rows:1fr;opacity:1}",
-      ".trio-settings-inner{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:8px}",
+      // 设置区:max-height 过渡实现向下延伸动画(display 保持 flex,不破坏面板滚动)。
+      ".trio-settings{display:flex;flex-direction:column;gap:8px;max-height:0;opacity:0;overflow:hidden;transition:max-height .28s ease,opacity .22s ease}",
+      ".trio-settings.on{max-height:2400px;opacity:1}",
       ".trio-settings-title{margin-top:8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
       ".trio-setrow{display:flex;flex-direction:column;gap:4px}",
       ".trio-sethead{display:flex;align-items:center;gap:8px;min-width:0}",
@@ -287,9 +286,7 @@ function embedJs(base: string): string {
   }
   function buildSettings() {
     settingsBox = el("div", "trio-settings");
-    var inner = el("div", "trio-settings-inner");
-    settingsBox.appendChild(inner);
-    inner.appendChild(el("div", "trio-settings-title", "模块配置 · 保存即时生效(标 ⟳ 的路径类改动需重启 DSH);凭据/密钥不回显"));
+    settingsBox.appendChild(el("div", "trio-settings-title", "模块配置 · 保存即时生效(标 ⟳ 的路径类改动需重启 DSH);凭据/密钥不回显"));
     for (var i = 0; i < SET_SECTIONS.length; i++) {
       var def = SET_SECTIONS[i];
       var box = el("div", "trio-setsec");
@@ -301,7 +298,7 @@ function embedJs(base: string): string {
       var body = el("div", "trio-setbody");
       box.appendChild(head);
       box.appendChild(body);
-      inner.appendChild(box);
+      settingsBox.appendChild(box);
       var sec = { box: box, body: body, status: status, entries: [], tokenInput: null };
       setSections[def.key] = sec;
       save.addEventListener("click", function (d, s) { return function () { saveSection(d, s); }; }(def, sec));
