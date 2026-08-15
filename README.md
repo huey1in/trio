@@ -95,6 +95,10 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 弹出大屏模态框**——实时画面每 2 秒刷新,下方列出**访问历史**(最近 50 条,
 点击可在新标签打开)。看着 agent 操作你的浏览器。
 
+**截图自动清理**:`browser_screenshot` 保存的 `.png` 会自动清理——每次截图后
+即时修剪,另每小时定时清扫一次;默认保留最近 7 天、最多 200 张
+(`screenshotMaxAgeDays` / `screenshotMaxCount`,设为 0 关闭对应规则)。
+
 > 首次调用浏览器工具时会自动启动浏览器;启动失败会提示你安装 Chromium
 > (`npx playwright install chromium`)或配置 `executablePath`。
 
@@ -109,6 +113,8 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
     executablePath: ""   # 显式指定浏览器可执行文件(优先于 channel)
     headless: true
     screenshotDir: .dsh-trio/screenshots
+    screenshotMaxAgeDays: 7   # 截图保留天数(0 = 不按时间清理)
+    screenshotMaxCount: 200   # 截图保留数量上限(0 = 不按数量清理)
     downloadDir: .dsh-trio/downloads
     liveViewPath: /trio/browser   # 面板实时画面数据 API 的挂载路径(不是页面)
     maxTextChars: 20000

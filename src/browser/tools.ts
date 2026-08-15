@@ -8,6 +8,7 @@ import {
   profileConfig, getProfileState, downloadsOf, launchProfile, newPage,
   getPage, activePage, tabList, closeBrowser, pageIdentity, stateOf,
   currentProfile, savedForms, lastFormFields, profileStates, setLastFormFields, setCurrentProfile,
+  noteScreenshotDir, cleanupScreenshots,
 } from "./session.js";
 import { workspaceCwd } from "../lib/tools.js";
 export async function openTool(config: BrowserConfig, args: Record<string, any>) {
@@ -123,6 +124,12 @@ export async function screenshotTool(config: BrowserConfig, args: Record<string,
   const filePath = join(dir, fileName);
   const buffer = await page.screenshot({ type: "png" });
   writeFileSync(filePath, buffer);
+  // 懒清理:按保留天数/数量修剪目录,并把目录记下供定时清扫复用。
+  noteScreenshotDir(dir);
+  cleanupScreenshots(dir, {
+    maxAgeDays: config.screenshotMaxAgeDays,
+    maxCount: config.screenshotMaxCount,
+  });
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
   return {
     path: filePath,

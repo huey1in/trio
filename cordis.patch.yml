@@ -4,7 +4,8 @@
 # 覆盖调整。不需要某个模块时,在用户的 cordis.patch.yml 里删除对应行即可。
 #
 # 行内 config 键:
-#   trio-browser:  channel('auto'|'chrome'|'msedge'|'chromium'|'') headless screenshotDir liveViewPath maxTextChars
+#   trio-browser:  channel('auto'|'chrome'|'msedge'|'chromium'|'') headless screenshotDir downloadDir
+#                  screenshotMaxAgeDays screenshotMaxCount liveViewPath maxTextChars
 #   trio-mcp:      path authTokenEnv runAgentTimeoutMs listSessionsLimit
 #   trio-github:   tokenEnv apiBase webhookPath webhookSecretEnv reviewModel({provider,model})
 
@@ -15,6 +16,8 @@
         channel: auto
         headless: true
         screenshotDir: .dsh-trio/screenshots
+        screenshotMaxAgeDays: 7
+        screenshotMaxCount: 200
         liveViewPath: /trio/browser
         maxTextChars: 20000
         maxLinks: 50

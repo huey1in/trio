@@ -14,7 +14,7 @@ import type { BrowserConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./register.js";
 import { registerBrowserApi } from "./ui.js";
-import { closeBrowser } from "./session.js";
+import { closeBrowser, sweepScreenshotDir } from "./session.js";
 
 export type { BrowserConfig } from "./types.js";
 export { profileConfig } from "./session.js";
@@ -30,6 +30,8 @@ const BROWSER_SCHEMA: ConfigSchema = {
   profiles: { type: "any" },
   screenshotDir: { type: "string" },
   downloadDir: { type: "string" },
+  screenshotMaxAgeDays: { type: "number", min: 0 },
+  screenshotMaxCount: { type: "number", min: 0 },
   liveViewPath: { type: "string" },
   maxTextChars: { type: "number", min: 1 },
   maxLinks: { type: "number", min: 1 },
@@ -44,6 +46,8 @@ const DEFAULT_CONFIG = {
   profiles: {}, // 命名浏览器配置: { work: { userDataDir, channel, headless }, personal: {...} }
   screenshotDir: ".dsh-trio/screenshots",
   downloadDir: ".dsh-trio/downloads",
+  screenshotMaxAgeDays: 7, // 截图保留天数(0 = 不按时间清理)
+  screenshotMaxCount: 200, // 截图保留数量上限(0 = 不按数量清理)
   liveViewPath: "/trio/browser",
   maxTextChars: 20000,
   maxLinks: 50,
@@ -77,7 +81,20 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
     ctx.effect(() => sectionDispose);
   }
   registerBrowserApi(ctx, config);
+  // 截图目录定时清扫:每小时一次(懒清理在每次截图后已即时执行)。
+  const sweepTimer = setInterval(() => {
+    try {
+      sweepScreenshotDir({
+        maxAgeDays: config.screenshotMaxAgeDays,
+        maxCount: config.screenshotMaxCount,
+      });
+    } catch {
+      /* ignore */
+    }
+  }, 60 * 60 * 1000);
+  sweepTimer.unref?.();
   ctx.effect(() => () => {
+    clearInterval(sweepTimer);
     void closeBrowser().catch(() => {});
   });
 }

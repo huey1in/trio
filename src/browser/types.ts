@@ -10,6 +10,10 @@ export interface BrowserConfig {
   profiles?: Record<string, Partial<BrowserConfig>>;
   screenshotDir?: string;
   downloadDir?: string;
+  /** 截图保留天数(0 = 不按时间清理)。 */
+  screenshotMaxAgeDays?: number;
+  /** 截图保留数量上限(0 = 不按数量清理)。 */
+  screenshotMaxCount?: number;
   liveViewPath?: string;
   maxTextChars?: number;
   maxLinks?: number;
