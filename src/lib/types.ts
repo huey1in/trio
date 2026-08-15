@@ -1,7 +1,7 @@
-// dsh-trio 共享类型定义(运行时零依赖;仅编译期使用)。
+// dsh-reef 共享类型定义(运行时零依赖;仅编译期使用)。
 
 /** 最小 Cordis 上下文(我们只消费这几个成员)。 */
-export interface TrioContext {
+export interface ReefContext {
   get<T = any>(name: string): T | undefined;
   effect(fn: () => (() => void) | void, label?: string): void;
   on?(event: string, listener: (...args: unknown[]) => unknown): (() => void) | void;

@@ -17,7 +17,7 @@ labels: bug
 应该发生什么。
 
 **环境**
-- dsh-trio 版本:
+- dsh-reef 版本:
 - DSH 版本(`dsh --version`):
 - 操作系统:
 - Node 版本:

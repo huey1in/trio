@@ -1,5 +1,5 @@
-// dsh-trio · 浏览器 — 工具注册(definePlainTool × 22)
-import type { TrioContext, PlainToolDefinition } from "../lib/types.js";
+// dsh-reef · 浏览器 — 工具注册(definePlainTool × 22)
+import type { ReefContext, PlainToolDefinition } from "../lib/types.js";
 import type { BrowserConfig } from "./types.js";
 import { definePlainTool, genericCard } from "../lib/tools.js";
 import {
@@ -8,7 +8,7 @@ import {
   tabsTool, downloadTool, uploadTool, cookiesTool, formTool, formSaveTool,
   formsTool, profileTool, elementsTool,
 } from "./tools.js";
-export function registerTools(ctx: TrioContext, config: BrowserConfig) {
+export function registerTools(ctx: ReefContext, config: BrowserConfig) {
   const tools = ctx.get<{ register(definition: PlainToolDefinition): unknown }>("tools");
   if (tools === undefined) return;
   const timeout = (ms?: number) => ms ?? config.timeoutMs;
@@ -209,7 +209,7 @@ export function registerTools(ctx: TrioContext, config: BrowserConfig) {
     definePlainTool({
       name: "browser_screenshot",
       description:
-        "把当前页面截图保存为 PNG 文件(默认存到工作区 .dsh-trio/screenshots/),返回文件路径。纯文本模型看不到图,但用户可以在实时画面页查看。",
+        "把当前页面截图保存为 PNG 文件(默认存到工作区 .dsh-reef/screenshots/),返回文件路径。纯文本模型看不到图,但用户可以在实时画面页查看。",
       parameters: {
         type: "object",
         properties: {
@@ -380,7 +380,7 @@ export function registerTools(ctx: TrioContext, config: BrowserConfig) {
     definePlainTool({
       name: "browser_download",
       description:
-        "获取页面上最近触发的下载(如点击下载链接后),保存到工作区 .dsh-trio/downloads/ 并返回路径。index 可选,默认最近一次;浏览器会话关闭后下载记录丢失。",
+        "获取页面上最近触发的下载(如点击下载链接后),保存到工作区 .dsh-reef/downloads/ 并返回路径。index 可选,默认最近一次;浏览器会话关闭后下载记录丢失。",
       parameters: {
         type: "object",
         properties: {

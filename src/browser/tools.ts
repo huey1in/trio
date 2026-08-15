@@ -1,4 +1,4 @@
-// dsh-trio · 浏览器 — 工具实现(22 个 browser_* 函数)
+// dsh-reef · 浏览器 — 工具实现(22 个 browser_* 函数)
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, isAbsolute } from "node:path";
 import type { Page } from "playwright-core";
@@ -118,7 +118,7 @@ export async function screenshotTool(config: BrowserConfig, args: Record<string,
   const screenshotDir =
     typeof ov.screenshotDir === "string" && ov.screenshotDir
       ? ov.screenshotDir
-      : (config.screenshotDir ?? ".dsh-trio/screenshots");
+      : (config.screenshotDir ?? ".dsh-reef/screenshots");
   const dir = isAbsolute(screenshotDir) ? screenshotDir : resolve(cwd, screenshotDir);
   mkdirSync(dir, { recursive: true });
   const safeName = String(args.name ?? `shot-${Date.now()}`).replace(
@@ -256,7 +256,7 @@ export async function downloadTool(config: BrowserConfig, args: Record<string, a
   const entry = recentDownloads[index];
   if (entry === undefined) throw new Error(`no download at index ${index}`);
   const cwd = workspaceCwd(exec);
-  const downloadDir = config.downloadDir ?? ".dsh-trio/downloads";
+  const downloadDir = config.downloadDir ?? ".dsh-reef/downloads";
   const dir = isAbsolute(downloadDir) ? downloadDir : resolve(cwd, downloadDir);
   mkdirSync(dir, { recursive: true });
   const safe = String(entry.suggestedFilename || `download-${Date.now()}`).replace(/[\\/:*?"<>|]/g, "_");

@@ -1,7 +1,7 @@
-// dsh-trio · GitLab — webhook 自动 MR 评审
+// dsh-reef · GitLab — webhook 自动 MR 评审
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { runLlm } from "../lib/llm.js";
 import { readRawBody, sendJson } from "../lib/http.js";
@@ -52,7 +52,7 @@ export function buildMrReviewPrompt(mr: Record<string, any>, changes: Record<str
   return `${head}\n\n${diffs}`;
 }
 
-export async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleWebhook(ctx: ReefContext, config: GitlabConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
   // 面板设置覆盖:webhookSecret(优先于环境变量),每次请求读取即时生效。
   const ov = sectionOverrides("gitlab", GITLAB_SETTING_FIELDS);
   const panelSecret = typeof ov.webhookSecret === "string" && ov.webhookSecret ? ov.webhookSecret : "";
@@ -112,15 +112,15 @@ export async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req:
         if (!review) throw new Error("empty review output");
         await glFetch(ctx, config, `/projects/${project}/merge_requests/${mr.iid}/notes`, {
           method: "POST",
-          body: { body: `🤖 dsh-trio 自动评审\n\n${review.slice(0, 60000)}` },
+          body: { body: `🤖 dsh-reef 自动评审\n\n${review.slice(0, 60000)}` },
         });
-        ctx.logger?.info?.(`dsh-trio/gitlab: reviewed ${mr.project}!${mr.iid}`);
+        ctx.logger?.info?.(`dsh-reef/gitlab: reviewed ${mr.project}!${mr.iid}`);
       } finally {
         clearTimeout(timer);
       }
     } catch (error) {
       ctx.logger?.warn?.(
-        `dsh-trio/gitlab: webhook review failed for ${mr.project}!${mr.iid}: ${error instanceof Error ? error.message : String(error)}`,
+        `dsh-reef/gitlab: webhook review failed for ${mr.project}!${mr.iid}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   })();

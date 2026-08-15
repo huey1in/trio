@@ -50,7 +50,7 @@ describe("工具定义与配置一致性", () => {
 describe("cleanupScreenshots", () => {
   const dirs: string[] = [];
   const makeDir = () => {
-    const dir = mkdtempSync(join(tmpdir(), "dsh-trio-shot-"));
+    const dir = mkdtempSync(join(tmpdir(), "dsh-reef-shot-"));
     dirs.push(dir);
     return dir;
   };
@@ -101,7 +101,7 @@ describe("cleanupScreenshots", () => {
   });
 
   it("目录不存在或规则全为 0 时不清理", () => {
-    expect(cleanupScreenshots(join(tmpdir(), "dsh-trio-no-such-dir-xyz"), { maxAgeDays: 7 })).toBe(0);
+    expect(cleanupScreenshots(join(tmpdir(), "dsh-reef-no-such-dir-xyz"), { maxAgeDays: 7 })).toBe(0);
     const dir = makeDir();
     touch(dir, "a.png", 999 * 86_400_000);
     expect(cleanupScreenshots(dir, {})).toBe(0);

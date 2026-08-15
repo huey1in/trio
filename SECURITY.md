@@ -2,7 +2,7 @@
 
 ## 报告漏洞
 
-dsh-trio 处理浏览器自动化、MCP 服务器与 GitHub/GitLab 凭据,安全至关重要。
+dsh-reef 处理浏览器自动化、MCP 服务器与 GitHub/GitLab 凭据,安全至关重要。
 
 - **请勿**在公开 issue 中披露漏洞细节。
 - 直接发送邮件至仓库维护者(通过 GitHub 主页的联系方式),或创建

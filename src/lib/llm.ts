@@ -1,6 +1,6 @@
-// dsh-trio 共享 LLM 调用助手:通过 ctx.llm 跑一次性文本生成(评审等)。
+// dsh-reef 共享 LLM 调用助手:通过 ctx.llm 跑一次性文本生成(评审等)。
 
-import type { ModelSelection, TrioContext } from "./types.js";
+import type { ModelSelection, ReefContext } from "./types.js";
 
 /** 流式 chunk 的最小形状。 */
 interface StreamChunkLite {
@@ -17,7 +17,7 @@ interface LlmService {
  * 用 ctx.llm 跑一次文本生成。模型选择顺序:spec({provider,model}) → agent 默认模型。
  */
 export async function runLlm(
-  ctx: TrioContext,
+  ctx: ReefContext,
   spec: Partial<ModelSelection> | undefined,
   system: string,
   prompt: string,
@@ -41,7 +41,7 @@ export async function runLlm(
     }
   }
   if (!provider || !model) {
-    throw new Error("no review model configured (set trio.*.reviewModel or a default model)");
+    throw new Error("no review model configured (set reef.*.reviewModel or a default model)");
   }
   const chunks = llm.stream({
     provider,

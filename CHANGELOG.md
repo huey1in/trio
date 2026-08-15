@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **项目更名 dsh-trio → dsh-reef**:包名、模块名(reef-browser / reef-mcp /
+  reef-github / reef-gitlab / reef-console)、默认路径(`/reef/*`)、内部类型
+  (ReefContext)、运行时目录(`$DSH_HOME/.dsh-reef/`、`.dsh-reef/screenshots`
+  等)全部更新;旧名存储(`.dsh-trio/tokens.json`、`.dsh-trio/settings.json`)
+  读取时自动迁移。鲸鱼图标不变。
+
 ### 新增
 
 - **写操作编码防坑提示**:GitHub/GitLab 模块的 systemPrompt 增加提醒——
@@ -21,7 +29,7 @@
     provider/model、自动评审事件(逗号分隔)+ webhookPath(重启生效);
   - **MCP**:访问 token(Bearer,密码型)+ 端点路径(重启生效);
   - **面板**:基路径(重启生效)。
-  普通配置写入 `$DSH_HOME/.dsh-trio/settings.json`(0600,按字段白名单
+  普通配置写入 `$DSH_HOME/.dsh-reef/settings.json`(0600,按字段白名单
   校验,空值恢复默认);密钥类沿用凭据库/自有存储,永不回传。各模块在
   使用时点读取覆盖值(webhook 签名/评审模型/鉴权/截图清理等),重启类
   字段在启动时合并。附带设置存储单元测试。
@@ -31,7 +39,7 @@
 - **面板 token 输入框禁用**:部署未挂载 DSH credentials 服务时
   (`ctx.get("credentials")` 为 undefined),设置端点错误地把 `writable` 置
   false 导致输入框无法输入。现在凭据服务缺失时回退到插件自有存储
-  `$DSH_HOME/.dsh-trio/tokens.json`(0600),工具的 `resolveToken` 也按
+  `$DSH_HOME/.dsh-reef/tokens.json`(0600),工具的 `resolveToken` 也按
   凭据服务 → 环境变量 → 自有存储的顺序解析。
 
 ## [1.4.0] - 2026-08-15
@@ -41,7 +49,7 @@
 - **面板设置区(⚙)**:GitHub/GitLab token 可直接在嵌入面板里配置,写入 DSH
   凭据库(`$DSH_HOME/.credentials.yaml`,0600),保存即时生效、无需重启;
   状态只回"已配置(凭据库/环境变量)/未配置",凭据值永不回传页面。
-  新增端点 `GET/POST /trio/github/settings` 与 `/trio/gitlab/settings`
+  新增端点 `GET/POST /reef/github/settings` 与 `/reef/gitlab/settings`
   (复用 `ctx.credentials` 服务,ref 固定为模块 tokenEnv,客户端不能指定
   任意 ref)。附带输入校验单元测试。
 
@@ -57,7 +65,7 @@
   gitlab_issues / gitlab_mr_list)。常驻自动化(webhook 自动评审、issue
   自动修复、事件看板)保留不变。
 - **嵌入面板视觉**:隐藏面板与访问历史列表的滚动条(保留滚动,`scrollbar-width`
-  + `::-webkit-scrollbar` 双端);移除面板头部的 "dsh-trio" 标题,头部只留
+  + `::-webkit-scrollbar` 双端);移除面板头部的 "dsh-reef" 标题,头部只留
   MCP 端点与设置齿轮。
 
 ## [1.3.1] - 2026-08-15
@@ -78,11 +86,11 @@
   (官方设计变量、自适应亮/暗主题),2 秒轮询实时画面,Esc / 点击遮罩关闭。
 - **浏览器访问历史**:每个 profile 记录主 frame 导航(去重、上限 50 条、
   自动补全标题),模态框下方按时间倒序展示,点击可在新标签打开;
-  数据端点 `GET /trio/browser/history`。
+  数据端点 `GET /reef/browser/history`。
 
 ### 变更
 
-- **移除独立实时画面页**:`/trio/browser` HTML 页面删除,`/status`
+- **移除独立实时画面页**:`/reef/browser` HTML 页面删除,`/status`
   `/screenshot` `/history` 三个数据端点保留供面板/模态框使用。
   面板中"实时画面 ↗"链接一并移除(由缩略图点击取代)。
 
@@ -90,8 +98,8 @@
 
 ### 变更
 
-- **移除独立控制台页**:`/trio` 状态页与原生嵌入面板功能重叠且样式不与官方
-  设计语言一致,现已删除(`CONSOLE_HTML` + `/trio` 前缀路由)。原生嵌入面板
+- **移除独立控制台页**:`/reef` 状态页与原生嵌入面板功能重叠且样式不与官方
+  设计语言一致,现已删除(`CONSOLE_HTML` + `/reef` 前缀路由)。原生嵌入面板
   (embed.js + tapIndex)完整保留,并新增:
   - GitHub 行显示最近事件数与**最近 3 条事件看板**(时间/事件/仓库/编号/处理结果);
   - 面板头部直接给出 MCP 端点 URL,便于配置 MCP 客户端;
@@ -101,8 +109,8 @@
 
 ### 修复
 
-- **实时画面页连接失败**:`/trio/browser` 页面用相对路径 `./status` 轮询,
-  无尾斜杠访问时解析到 `/trio/status` 收到 404("not found" 纯文本),
+- **实时画面页连接失败**:`/reef/browser` 页面用相对路径 `./status` 轮询,
+  无尾斜杠访问时解析到 `/reef/status` 收到 404("not found" 纯文本),
   `r.json()` 报 `Unexpected token 'o'`。改为服务端把 API 基址以绝对路径
   注入页面(`API + '/status'`),并加 `r.ok` 检查给出明确的 HTTP 状态错误。
 
@@ -134,10 +142,10 @@
 ### 新增
 
 - **原生 Web UI 嵌入**:通过 `webServer.tapIndex` 向 DSH index.html 注入
-  `/trio/embed.js`,在原生界面右下角渲染 dsh-trio 浮动面板(浏览器/MCP/
+  `/reef/embed.js`,在原生界面右下角渲染 dsh-reef 浮动面板(浏览器/MCP/
   GitHub 三模块状态 + 浏览器实时画面 + 跳转入口)。零依赖原生 JS,
   不依赖官方 DOM 结构;样式严格使用官方 `--dsw-alias-*` 设计变量,
-  自动适配亮/暗主题。独立 `/trio` 控制台页保留。
+  自动适配亮/暗主题。独立 `/reef` 控制台页保留。
 
 ## [1.0.1] - 2026-08-15
 
@@ -145,8 +153,8 @@
 
 - **构建产物扁平化**:tsdown 入口改为 name→path 映射,输出 `lib/browser.mjs`
   等扁平文件,与 `exports` 映射一致(拆分后产物落在子目录导致
-  `dsh-trio/browser` 等子路径解析失败,插件无法加载)。
-- **控制台探测路径**:页面在无尾斜杠 URL(`/trio`)下相对路径解析错位导致
+  `dsh-reef/browser` 等子路径解析失败,插件无法加载)。
+- **控制台探测路径**:页面在无尾斜杠 URL(`/reef`)下相对路径解析错位导致
   三个模块误报"模块未启用";全部改为基于 `location.pathname` 的绝对路径,
   并补全 MCP/GitHub 端点展示与实时画面链接。
 - **MCP 协议层清理**:移除重复的 `oauthTokens` 定义、更新 `SERVER_VERSION`、
@@ -187,7 +195,7 @@
 - **🐙 GitHub 集成(13 工具)**:issue/PR 全流程、行内评论、webhook 自动评审(去重)、
   issue 自动修复闭环(agent 修 → 自动开 PR)、事件看板。
 - **🦊 GitLab 集成(7 工具)**:项目/issue/MR、MR 行内评论、webhook 自动评审。
-- **🎛️ 控制台**:`/trio` 状态页,一页汇总五模块状态与最近事件。
+- **🎛️ 控制台**:`/reef` 状态页,一页汇总五模块状态与最近事件。
 
 ## [0.4.0] - 2026-08-14
 

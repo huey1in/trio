@@ -1,5 +1,5 @@
-// dsh-trio · GitHub — REST API 层(token 解析、请求与重试、字段投影)
-import type { TrioContext } from "../lib/types.js";
+// dsh-reef · GitHub — REST API 层(token 解析、请求与重试、字段投影)
+import type { ReefContext } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
 import { readStoredToken } from "../lib/credentials.js";
 
@@ -7,7 +7,7 @@ import { readStoredToken } from "../lib/credentials.js";
 export function encodeProject(project: string): string {
   return encodeURIComponent(String(project));
 }
-export async function resolveToken(ctx: TrioContext, config: GithubConfig): Promise<string | undefined> {
+export async function resolveToken(ctx: ReefContext, config: GithubConfig): Promise<string | undefined> {
   try {
     const credentials = ctx.get("credentials");
     if (credentials !== undefined) {
@@ -23,7 +23,7 @@ export async function resolveToken(ctx: TrioContext, config: GithubConfig): Prom
   return await readStoredToken(config.tokenEnv ?? "GITHUB_TOKEN");
 }
 
-export async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
+export async function ghFetch(ctx: ReefContext, config: GithubConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
   const token = await resolveToken(ctx, config);
   const method = options.method ?? "GET";
   // 只读请求允许匿名(公共仓库 60 次/小时);写操作必须带 token。
@@ -34,7 +34,7 @@ export async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: 
   }
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
-    "user-agent": "dsh-trio",
+    "user-agent": "dsh-reef",
   };
   if (token) headers.authorization = `Bearer ${token}`;
   let body;

@@ -1,4 +1,4 @@
-// dsh-trio · GitHub — 类型与默认配置
+// dsh-reef · GitHub — 类型与默认配置
 /** GitHub 模块配置。 */
 export interface GithubConfig {
   enabled?: boolean;

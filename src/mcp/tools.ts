@@ -1,4 +1,4 @@
-// dsh-trio · MCP — 暴露给客户端的工具表
+// dsh-reef · MCP — 暴露给客户端的工具表
 export const MCP_TOOLS = [
   {
     name: "dsh_list_sessions",

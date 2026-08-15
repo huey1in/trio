@@ -1,15 +1,15 @@
-// dsh-trio · 凭据设置端点(GET 状态 / POST 保存)+ 插件自有 token 存储
+// dsh-reef · 凭据设置端点(GET 状态 / POST 保存)+ 插件自有 token 存储
 //
 // 供 github / gitlab 模块在各自的 /settings 路由复用。保存优先级:
 //   1. DSH credentials 服务(若部署挂载了 provider,写入 $DSH_HOME/.credentials.yaml);
-//   2. 插件自有文件存储 $DSH_HOME/.dsh-trio/tokens.json(0600)。
+//   2. 插件自有文件存储 $DSH_HOME/.dsh-reef/tokens.json(0600)。
 // 工具侧 resolveToken 按 credentials 服务 → 环境变量 → 自有存储的顺序解析,
 // 面板保存后无需重启即时生效。端点只返回"是否已配置 + 来源",永不回传凭据值。
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 
 interface CredentialsSeam {
   resolve(ref: string): Promise<{ value?: string; source?: string } | undefined>;
@@ -22,15 +22,38 @@ interface CredentialsSeam {
 // 插件自有 token 存储(credentials 服务缺失时的回退)
 // ---------------------------------------------------------------------------
 
-/** 自有 token 存储文件路径($DSH_HOME/.dsh-trio/tokens.json)。 */
+/** 自有 token 存储文件路径($DSH_HOME/.dsh-reef/tokens.json)。 */
 export function tokenStorePath(): string {
+  const home = process.env.DSH_HOME || join(homedir(), ".dsh");
+  return join(home, ".dsh-reef", "tokens.json");
+}
+
+/** 旧名存储路径(dsh-trio 时代遗留,读取时自动迁移)。 */
+function legacyTokenStorePath(): string {
   const home = process.env.DSH_HOME || join(homedir(), ".dsh");
   return join(home, ".dsh-trio", "tokens.json");
 }
 
 function readStore(): Record<string, string> {
+  const file = tokenStorePath();
+  let raw: string | null = null;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(tokenStorePath(), "utf8"));
+    raw = readFileSync(file, "utf8");
+  } catch {
+    /* 文件缺失 */
+  }
+  if (raw === null) {
+    // 迁移旧名存储:dsh-trio → dsh-reef
+    try {
+      raw = readFileSync(legacyTokenStorePath(), "utf8");
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      writeFileSync(file, raw, { mode: 0o600 });
+    } catch {
+      return {};
+    }
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
     return parsed !== null && typeof parsed === "object" ? parsed as Record<string, string> : {};
   } catch {
     return {};
@@ -79,7 +102,7 @@ export function validateCredentialValue(value: unknown): string | { error: strin
 }
 
 /** 实际可用的后端:credentials 服务(挂载时)或插件自有存储。 */
-async function usableBackend(ctx: TrioContext, tokenEnv: string): Promise<"credentials" | "store"> {
+async function usableBackend(ctx: ReefContext, tokenEnv: string): Promise<"credentials" | "store"> {
   const credentials = ctx.get("credentials") as CredentialsSeam | undefined;
   if (credentials !== undefined) {
     try {
@@ -94,7 +117,7 @@ async function usableBackend(ctx: TrioContext, tokenEnv: string): Promise<"crede
 
 /** token 配置状态(面板展示用,永不回传值)。 */
 export async function credentialStatus(
-  ctx: TrioContext,
+  ctx: ReefContext,
   tokenEnv: string,
   label?: string,
 ): Promise<Record<string, unknown>> {
@@ -124,7 +147,7 @@ export async function credentialStatus(
 }
 
 /** 写入或清除 token(credentials 服务 → 自有存储回退)。空串 = 清除。 */
-export async function writeCredential(ctx: TrioContext, tokenEnv: string, value: string): Promise<void> {
+export async function writeCredential(ctx: ReefContext, tokenEnv: string, value: string): Promise<void> {
   const credentials = ctx.get("credentials") as CredentialsSeam | undefined;
   const backend = await usableBackend(ctx, tokenEnv);
   if (backend === "credentials" && credentials !== undefined) {

@@ -1,4 +1,4 @@
-// dsh-trio · GitLab 集成
+// dsh-reef · GitLab 集成
 //
 // 3 个只读 GitLab REST API 工具:
 //   gitlab_project / gitlab_issues / gitlab_mr_list
@@ -9,7 +9,7 @@
 // 通过 PRIVATE-TOKEN header 发送。project 参数接受 "owner/repo" 形式。
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
+import type { ReefContext, WebRoute } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./tools.js";
@@ -23,7 +23,7 @@ export type { GitlabConfig } from "./types.js";
 export { extractMrRef, verifyToken } from "./webhook.js";
 export { encodeProject, projectMr, projectIssue } from "./api.js";
 
-export const name = "trio-gitlab";
+export const name = "reef-gitlab";
 export const inject = ["tools"];
 
 const GITLAB_SCHEMA: ConfigSchema = {
@@ -40,7 +40,7 @@ const GITLAB_SCHEMA: ConfigSchema = {
 const DEFAULT_CONFIG = {
   tokenEnv: "GITLAB_TOKEN",
   apiBase: "https://gitlab.com/api/v4",
-  webhookPath: "/trio/gitlab/webhook",
+  webhookPath: "/reef/gitlab/webhook",
   webhookSecretEnv: "GITLAB_WEBHOOK_SECRET",
   reviewModel: {}, // { provider, model } — 空则用 agent 默认模型
   reviewMaxDiffChars: 60000,
@@ -48,10 +48,10 @@ const DEFAULT_CONFIG = {
 };
 
 
-function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
+function registerWebhook(ctx: ReefContext, config: GitlabConfig): void {
   const webServer = ctx.get("webServer");
   if (webServer === undefined) return;
-  const base = (config.webhookPath ?? '/trio/gitlab/webhook').replace(/\/+$/, "");
+  const base = (config.webhookPath ?? '/reef/gitlab/webhook').replace(/\/+$/, "");
   const dispose = webServer.register({
     kind: "exact",
     path: base,
@@ -89,7 +89,7 @@ function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
   });
 }
 
-export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+export function apply(ctx: ReefContext, rawConfig: Record<string, any>) {
   const resolved = resolveConfig("gitlab", GITLAB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GitlabConfig;
   const tools = ctx.get("tools");
   if (tools === undefined) return;

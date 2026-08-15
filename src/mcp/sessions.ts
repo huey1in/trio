@@ -1,5 +1,5 @@
-// dsh-trio · MCP — 会话查询与事件投影
-import type { TrioContext } from "../lib/types.js";
+// dsh-reef · MCP — 会话查询与事件投影
+import type { ReefContext } from "../lib/types.js";
 import type { McpConfig } from "./types.js";
 export function summarize(events: any[], firstSeq: number) {
   let started = false;
@@ -57,7 +57,7 @@ export function projectEvent(event: Record<string, any>, maxChars = 400) {
   }
 }
 
-export async function listSessions(ctx: TrioContext, args: Record<string, any>) {
+export async function listSessions(ctx: ReefContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const limit = Math.min(Math.max(Number(args?.limit ?? 50) || 50, 1), 200);
@@ -83,7 +83,7 @@ export async function listSessions(ctx: TrioContext, args: Record<string, any>) 
   return { sessions: rows };
 }
 
-export async function readSession(ctx: TrioContext, args: Record<string, any>) {
+export async function readSession(ctx: ReefContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const sessionId = String(args?.sessionId ?? "");
@@ -99,7 +99,7 @@ export async function readSession(ctx: TrioContext, args: Record<string, any>) {
   };
 }
 
-export async function searchSessions(ctx: TrioContext, args: Record<string, any>) {
+export async function searchSessions(ctx: ReefContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) throw new Error("sessionQuery service unavailable");
   const q = String(args?.query ?? "");
@@ -117,7 +117,7 @@ export async function searchSessions(ctx: TrioContext, args: Record<string, any>
 }
 
 
-export async function resourcesList(ctx: TrioContext, args: Record<string, any>) {
+export async function resourcesList(ctx: ReefContext, args: Record<string, any>) {
   const query = ctx.get("sessionQuery");
   if (query === undefined) return { resources: [] };
   const limit = Math.min(Math.max(Number(args?.limit ?? 20) || 20, 1), 50);
@@ -141,7 +141,7 @@ export async function resourcesList(ctx: TrioContext, args: Record<string, any>)
   return { resources };
 }
 
-export async function resourcesRead(ctx: TrioContext, args: Record<string, any>) {
+export async function resourcesRead(ctx: ReefContext, args: Record<string, any>) {
   const uri = String(args?.uri ?? "");
   const match = uri.match(/^dsh:\/\/sessions\/(.+)$/);
   if (!match) throw new Error(`unsupported resource uri: ${uri}`);

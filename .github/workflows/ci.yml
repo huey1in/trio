@@ -46,7 +46,7 @@ jobs:
           if (!pkg.dsh?.bundle?.patch) throw new Error('missing dsh.bundle.patch');
           const fs = require('fs');
           const patch = fs.readFileSync(pkg.dsh.bundle.patch, 'utf8');
-          for (const row of ['trio-browser', 'trio-mcp', 'trio-github', 'trio-gitlab', 'trio-console']) {
+          for (const row of ['reef-browser', 'reef-mcp', 'reef-github', 'reef-gitlab', 'reef-console']) {
             if (!patch.includes('id: ' + row)) throw new Error('missing row ' + row);
           }
           console.log('OK bundle manifest rows');

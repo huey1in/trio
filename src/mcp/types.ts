@@ -1,4 +1,4 @@
-// dsh-trio · MCP — 类型
+// dsh-reef · MCP — 类型
 /** MCP 模块配置。 */
 export interface McpConfig {
   enabled?: boolean;

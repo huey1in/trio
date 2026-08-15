@@ -1,12 +1,12 @@
-// dsh-trio · GitLab — REST API 层
-import type { TrioContext } from "../lib/types.js";
+// dsh-reef · GitLab — REST API 层
+import type { ReefContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { readStoredToken } from "../lib/credentials.js";
 
 export function encodeProject(project: string): string {
   return encodeURIComponent(String(project));
 }
-export async function resolveToken(ctx: TrioContext, config: GitlabConfig): Promise<string | undefined> {
+export async function resolveToken(ctx: ReefContext, config: GitlabConfig): Promise<string | undefined> {
   try {
     const credentials = ctx.get("credentials");
     if (credentials !== undefined) {
@@ -22,7 +22,7 @@ export async function resolveToken(ctx: TrioContext, config: GitlabConfig): Prom
   return await readStoredToken(config.tokenEnv ?? "GITLAB_TOKEN");
 }
 
-export async function glFetch(ctx: TrioContext, config: GitlabConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
+export async function glFetch(ctx: ReefContext, config: GitlabConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
   const token = await resolveToken(ctx, config);
   if (!token) {
     throw new Error(
@@ -31,7 +31,7 @@ export async function glFetch(ctx: TrioContext, config: GitlabConfig, pathname: 
   }
   const headers: Record<string, string> = {
     "PRIVATE-TOKEN": token,
-    "user-agent": "dsh-trio",
+    "user-agent": "dsh-reef",
   };
   let body;
   if (options.body !== undefined) {

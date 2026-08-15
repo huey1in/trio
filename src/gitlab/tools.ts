@@ -1,13 +1,13 @@
-// dsh-trio · GitLab — 工具注册(3 个只读 gitlab_*)
+// dsh-reef · GitLab — 工具注册(3 个只读 gitlab_*)
 //
 // 瘦身说明:写操作(建 issue/MR、评论)交给 agent 用 bash + glab CLI
 // (或 curl + GITLAB_TOKEN),插件只保留 3 个高频只读工具;
 // 常驻自动化(webhook MR 评审)在 webhook.ts,是 bash 无法替代的部分。
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { definePlainTool, genericCard } from "../lib/tools.js";
 import { glFetch, encodeProject, projectIssue, projectMr } from "./api.js";
-export function registerTools(ctx: TrioContext, config: GitlabConfig) {
+export function registerTools(ctx: ReefContext, config: GitlabConfig) {
   const tools = ctx.get("tools");
   if (tools === undefined) return;
 

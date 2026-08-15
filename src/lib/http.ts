@@ -1,4 +1,4 @@
-// dsh-trio shared HTTP helpers for webServer route handlers.
+// dsh-reef shared HTTP helpers for webServer route handlers.
 // webServer handlers receive plain node:http IncomingMessage/ServerResponse.
 
 import type { IncomingMessage, ServerResponse } from "node:http";

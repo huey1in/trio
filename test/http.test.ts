@@ -21,7 +21,7 @@ function mockRes() {
 
 describe("http helpers", () => {
   it("urlPath 解析 pathname 并忽略 query", () => {
-    expect(urlPath({ url: "/trio/mcp?x=1" } as any)).toBe("/trio/mcp");
+    expect(urlPath({ url: "/reef/mcp?x=1" } as any)).toBe("/reef/mcp");
     expect(urlPath({ url: "/" } as any)).toBe("/");
     expect(urlPath({} as any)).toBe("/");
   });

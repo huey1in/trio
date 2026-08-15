@@ -1,11 +1,11 @@
-// dsh-trio · MCP — agent 执行(dsh_run_agent 与状态)
+// dsh-reef · MCP — agent 执行(dsh_run_agent 与状态)
 import { randomUUID } from "node:crypto";
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { McpConfig, ProgressFn, DeltaFn } from "./types.js";
 import { summarize, truncate } from "./sessions.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-export async function runAgent(ctx: TrioContext, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
+export async function runAgent(ctx: ReefContext, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const defaultModel = ctx.get("agentDefaultModel");
@@ -84,7 +84,7 @@ export async function runAgent(ctx: TrioContext, args: Record<string, any>, onPr
 }
 
 
-export async function agentsStatus(ctx: TrioContext) {
+export async function agentsStatus(ctx: ReefContext) {
   const agents = ctx.get("agents");
   if (agents === undefined) throw new Error("agents service unavailable");
   const list = agents.list();

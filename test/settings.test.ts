@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  readTrioSettings,
+  readReefSettings,
   writeSettingsSection,
   sectionOverrides,
   validateFieldValue,
@@ -19,7 +19,7 @@ const SPEC: FieldSpec[] = [
 ];
 
 describe("settings 存储", () => {
-  const tempHome = mkdtempSync(join(tmpdir(), "dsh-trio-settings-"));
+  const tempHome = mkdtempSync(join(tmpdir(), "dsh-reef-settings-"));
   const prevHome = process.env.DSH_HOME;
 
   beforeAll(() => {
@@ -70,7 +70,7 @@ describe("settings 存储", () => {
     // 直接污染存储文件
     await writeSettingsSection("browser", { headless: false }, SPEC);
     const fs = await import("node:fs");
-    const path = join(tempHome, ".dsh-trio", "settings.json");
+    const path = join(tempHome, ".dsh-reef", "settings.json");
     const store = JSON.parse(fs.readFileSync(path, "utf8"));
     store.browser.headless = "corrupted";
     store.browser.unknownKey = "x";
@@ -85,13 +85,13 @@ describe("settings 存储", () => {
     expect(validateFieldValue(SPEC[2], "abc")).toEqual({ ok: false, error: expect.stringContaining("number") });
   });
 
-  it("readTrioSettings 文件缺失返回空对象", () => {
+  it("readReefSettings 文件缺失返回空对象", () => {
     // 切到全新目录
-    const other = mkdtempSync(join(tmpdir(), "dsh-trio-empty-"));
+    const other = mkdtempSync(join(tmpdir(), "dsh-reef-empty-"));
     const prev = process.env.DSH_HOME;
     process.env.DSH_HOME = other;
     try {
-      expect(readTrioSettings()).toEqual({});
+      expect(readReefSettings()).toEqual({});
     } finally {
       process.env.DSH_HOME = prev;
       try { rmSync(other, { recursive: true, force: true }); } catch { /* ignore */ }

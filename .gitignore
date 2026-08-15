@@ -2,7 +2,7 @@ node_modules/
 /lib/
 dist/
 *.tgz
-.dsh-trio/
+.dsh-reef/
 .DS_Store
 e2e.patch.yml
 tsconfig.tsbuildinfo

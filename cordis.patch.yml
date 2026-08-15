@@ -1,43 +1,43 @@
-# dsh-trio bundle patch — 浏览器自动化 + MCP Server + GitHub 集成。
+# dsh-reef bundle patch — 浏览器自动化 + MCP Server + GitHub 集成。
 #
 # 三条插件行:每一行都可以通过行内 config 或用户 profile 的 cordis.patch.yml
 # 覆盖调整。不需要某个模块时,在用户的 cordis.patch.yml 里删除对应行即可。
 #
 # 行内 config 键:
-#   trio-browser:  channel('auto'|'chrome'|'msedge'|'chromium'|'') headless screenshotDir downloadDir
+#   reef-browser:  channel('auto'|'chrome'|'msedge'|'chromium'|'') headless screenshotDir downloadDir
 #                  screenshotMaxAgeDays screenshotMaxCount liveViewPath maxTextChars
-#   trio-mcp:      path authTokenEnv runAgentTimeoutMs listSessionsLimit
-#   trio-github:   tokenEnv apiBase webhookPath webhookSecretEnv reviewModel({provider,model})
+#   reef-mcp:      path authTokenEnv runAgentTimeoutMs listSessionsLimit
+#   reef-github:   tokenEnv apiBase webhookPath webhookSecretEnv reviewModel({provider,model})
 
 - insert:
-    - id: trio-browser
-      name: dsh-trio/browser
+    - id: reef-browser
+      name: dsh-reef/browser
       config:
         channel: auto
         headless: true
-        screenshotDir: .dsh-trio/screenshots
+        screenshotDir: .dsh-reef/screenshots
         screenshotMaxAgeDays: 7
         screenshotMaxCount: 200
-        liveViewPath: /trio/browser
+        liveViewPath: /reef/browser
         maxTextChars: 20000
         maxLinks: 50
         timeoutMs: 30000
 
-    - id: trio-mcp
-      name: dsh-trio/mcp
+    - id: reef-mcp
+      name: dsh-reef/mcp
       config:
-        path: /trio/mcp
+        path: /reef/mcp
         authTokenEnv: ""
         runAgentTimeoutMs: 300000
         runAgentMaxOutputChars: 120000
         listSessionsLimit: 50
 
-    - id: trio-github
-      name: dsh-trio/github
+    - id: reef-github
+      name: dsh-reef/github
       config:
         tokenEnv: GITHUB_TOKEN
         apiBase: https://api.github.com
-        webhookPath: /trio/github/webhook
+        webhookPath: /reef/github/webhook
         webhookSecretEnv: GITHUB_WEBHOOK_SECRET
         reviewModel: {}
         reviewMaxDiffChars: 60000
@@ -46,12 +46,12 @@
           - synchronize
           - reopened
 
-    - id: trio-console
-      name: dsh-trio/console
+    - id: reef-console
+      name: dsh-reef/console
       config: {}
 
-    - id: trio-gitlab
-      name: dsh-trio/gitlab
+    - id: reef-gitlab
+      name: dsh-reef/gitlab
       config:
         tokenEnv: GITLAB_TOKEN
         apiBase: https://gitlab.com/api/v4

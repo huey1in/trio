@@ -1,4 +1,4 @@
-// 浏览器启动验证:模拟 dsh-trio/browser 的通道探测逻辑(仅测试用)
+// 浏览器启动验证:模拟 dsh-reef/browser 的通道探测逻辑(仅测试用)
 import { chromium } from "playwright-core";
 
 const candidates = [];

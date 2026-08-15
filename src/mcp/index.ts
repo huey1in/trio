@@ -1,7 +1,7 @@
-// dsh-trio · MCP Server
+// dsh-reef · MCP Server
 //
 // 零依赖实现 MCP Streamable HTTP(2025-03-26)服务器,挂在 DSH 的
-// ctx.webServer 路由上(默认 /trio/mcp)。把 DSH 的能力反向暴露给任何 MCP
+// ctx.webServer 路由上(默认 /reef/mcp)。把 DSH 的能力反向暴露给任何 MCP
 // 客户端:Claude Desktop、Cursor、Cline、其他 agent…
 //
 // 暴露的工具:
@@ -11,10 +11,10 @@
 //   dsh_run_agent       用默认模型跑一个一次性 agent(深研/执行任务)
 //
 // 用法示例(客户端侧):
-//   mcpServers: { "dsh": { "url": "http://127.0.0.1:3080/trio/mcp" } }
+//   mcpServers: { "dsh": { "url": "http://127.0.0.1:3080/reef/mcp" } }
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
+import type { ReefContext, WebRoute } from "../lib/types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { handlePost, handleGetWithConfig } from "./protocol.js";
 import { oauthMetadata, isOAuthEnabled } from "./oauth.js";
@@ -27,7 +27,7 @@ export { summarize, truncate, projectEvent } from "./sessions.js";
 export { rpcError, rpcResult } from "./protocol.js";
 export { MCP_TOOLS } from "./tools.js";
 
-export const name = "trio-mcp";
+export const name = "reef-mcp";
 export const inject = ["webServer"];
 
 const MCP_SCHEMA: ConfigSchema = {
@@ -45,20 +45,20 @@ const MCP_SCHEMA: ConfigSchema = {
 };
 
 const DEFAULT_CONFIG = {
-  path: "/trio/mcp",
+  path: "/reef/mcp",
   authTokenEnv: "", // 静态 Bearer token 的环境变量名;设置后所有请求要求 Authorization: Bearer <token>
   // OAuth 2.0 client_credentials(可选,与静态 token 二选一或并存)
   oauthEnabled: false,
   oauthClientIdEnv: "MCP_CLIENT_ID",
   oauthClientSecretEnv: "MCP_CLIENT_SECRET",
   oauthTokenTtlMs: 3600000,
-  oauthTokenPath: "/trio/mcp/oauth/token",
+  oauthTokenPath: "/reef/mcp/oauth/token",
   runAgentTimeoutMs: 300000,
   runAgentMaxOutputChars: 120000,
   listSessionsLimit: 50,
 };
 
-export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+export function apply(ctx: ReefContext, rawConfig: Record<string, any>) {
   const resolved = resolveConfig("mcp", MCP_SCHEMA, DEFAULT_CONFIG, rawConfig) as import("./types.js").McpConfig;
   if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
   const webServer = ctx.get<{ register(route: WebRoute): () => void; port?: number }>("webServer");
@@ -69,7 +69,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
     ...resolved,
     ...(typeof ov.path === "string" && ov.path ? { path: ov.path } : {}),
   };
-  const base = (config.path ?? "/trio/mcp").replace(/\/+$/, "");
+  const base = (config.path ?? "/reef/mcp").replace(/\/+$/, "");
   const disposers: (() => void)[] = [];
   disposers.push(
     webServer.register({
@@ -116,7 +116,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   });
   const port = webServer.port;
   if (typeof port === "number") {
-    ctx.logger?.info?.(`dsh-trio/mcp: MCP server at http://127.0.0.1:${port}${base}`);
+    ctx.logger?.info?.(`dsh-reef/mcp: MCP server at http://127.0.0.1:${port}${base}`);
   }
   // OAuth 授权服务器元数据(RFC 8414 discovery)
   if (isOAuthEnabled(config)) {
@@ -134,7 +134,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
     });
     disposers.push(discoveryDispose);
     ctx.logger?.info?.(
-      `dsh-trio/mcp: OAuth client_credentials enabled — token endpoint ${base}/oauth/token`,
+      `dsh-reef/mcp: OAuth client_credentials enabled — token endpoint ${base}/oauth/token`,
     );
   }
 }

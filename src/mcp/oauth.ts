@@ -1,4 +1,4 @@
-// dsh-trio · MCP — OAuth 2.0 client_credentials(轻量实现)
+// dsh-reef · MCP — OAuth 2.0 client_credentials(轻量实现)
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpConfig } from "./types.js";
@@ -70,7 +70,7 @@ export async function handleOAuthToken(req: IncomingMessage, res: ServerResponse
 
 /** OAuth 授权服务器元数据(RFC 8414)。 */
 export function oauthMetadata(config: McpConfig, host: string) {
-  const base = `http://${host}${(config.path ?? "/trio/mcp").replace(/\/+$/, "")}`;
+  const base = `http://${host}${(config.path ?? "/reef/mcp").replace(/\/+$/, "")}`;
   return {
     issuer: base,
     token_endpoint: `${base}/oauth/token`,

@@ -1,4 +1,4 @@
-// dsh-trio · 运行时设置存储($DSH_HOME/.dsh-trio/settings.json)+ 通用设置端点
+// dsh-reef · 运行时设置存储($DSH_HOME/.dsh-reef/settings.json)+ 通用设置端点
 //
 // 面板 ⚙ 设置区的后端:每个模块注册自己的字段白名单(FieldSpec),POST 写入前
 // 按白名单校验类型/枚举,原子写入 0600 文件。模块在使用时点读取覆盖值;
@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
+import type { ReefContext, WebRoute } from "../lib/types.js";
 import { readRawBody, sendJson, sendText } from "./http.js";
 import { validateCredentialValue, credentialStatus, writeCredential } from "./credentials.js";
 
@@ -25,16 +25,38 @@ export interface FieldSpec {
 
 type SectionStore = Record<string, Record<string, unknown>>;
 
-/** 设置存储文件路径($DSH_HOME/.dsh-trio/settings.json)。 */
+/** 设置存储文件路径($DSH_HOME/.dsh-reef/settings.json)。 */
 export function settingsStorePath(): string {
+  const home = process.env.DSH_HOME || join(homedir(), ".dsh");
+  return join(home, ".dsh-reef", "settings.json");
+}
+
+/** 旧名存储路径(dsh-trio 时代遗留,读取时自动迁移)。 */
+function legacySettingsStorePath(): string {
   const home = process.env.DSH_HOME || join(homedir(), ".dsh");
   return join(home, ".dsh-trio", "settings.json");
 }
 
-/** 读取整个设置存储(文件缺失/损坏时返回空对象)。 */
-export function readTrioSettings(): SectionStore {
+/** 读取整个设置存储(文件缺失/损坏时返回空对象;旧名存储自动迁移)。 */
+export function readReefSettings(): SectionStore {
+  const file = settingsStorePath();
+  let raw: string | null = null;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(settingsStorePath(), "utf8"));
+    raw = readFileSync(file, "utf8");
+  } catch {
+    /* 文件缺失 */
+  }
+  if (raw === null) {
+    try {
+      raw = readFileSync(legacySettingsStorePath(), "utf8");
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      writeFileSync(file, raw, { mode: 0o600 });
+    } catch {
+      return {};
+    }
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
     return parsed !== null && typeof parsed === "object" ? parsed as SectionStore : {};
   } catch {
     return {};
@@ -91,7 +113,7 @@ export async function writeSettingsSection(section: string, patch: Record<string
   }
   const file = settingsStorePath();
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const store = readTrioSettings();
+  const store = readReefSettings();
   const sectionStore: Record<string, unknown> = { ...(store[section] ?? {}) };
   for (const [key, value] of Object.entries(cleaned)) {
     if (value === "") delete sectionStore[key];
@@ -108,7 +130,7 @@ export async function writeSettingsSection(section: string, patch: Record<string
  * 不含默认值——调用方自行回退到模块默认配置。
  */
 export function sectionOverrides(section: string, spec: FieldSpec[]): Record<string, unknown> {
-  const stored = readTrioSettings()[section];
+  const stored = readReefSettings()[section];
   if (stored === undefined) return {};
   const allowed = new Map(spec.map((f) => [f.key, f]));
   const out: Record<string, unknown> = {};
@@ -145,7 +167,7 @@ function fieldState(field: FieldSpec, overrides: Record<string, unknown>): Recor
  * `{ token?, fields? }`。tokenEnv 缺省时跳过 token 部分。
  */
 export async function handleModuleSettings(
-  ctx: TrioContext,
+  ctx: ReefContext,
   req: IncomingMessage,
   res: ServerResponse,
   section: string,
@@ -196,7 +218,7 @@ export async function handleModuleSettings(
 
 /** 注册 exact 路由 `${base}/settings`(供无前缀路由冲突的模块使用)。 */
 export function registerModuleSettingsRoute(
-  ctx: TrioContext,
+  ctx: ReefContext,
   base: string,
   section: string,
   spec: FieldSpec[],

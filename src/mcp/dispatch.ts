@@ -1,9 +1,9 @@
-// dsh-trio · MCP — tools/call 分发
-import type { TrioContext } from "../lib/types.js";
+// dsh-reef · MCP — tools/call 分发
+import type { ReefContext } from "../lib/types.js";
 import type { McpConfig, ProgressFn, DeltaFn } from "./types.js";
 import { listSessions, readSession, searchSessions, resourcesList, resourcesRead } from "./sessions.js";
 import { runAgent, agentsStatus } from "./agent.js";
-export async function callMcpTool(ctx: TrioContext, name: string, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
+export async function callMcpTool(ctx: ReefContext, name: string, args: Record<string, any>, onProgress: ProgressFn | undefined, onDelta: DeltaFn | undefined) {
   switch (name) {
     case "dsh_list_sessions":
       return listSessions(ctx, args);

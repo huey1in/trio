@@ -1,4 +1,4 @@
-// dsh-trio · 浏览器自动化
+// dsh-reef · 浏览器自动化
 //
 // 一个共享的 Playwright 浏览器会话(agent 通过工具控制,人在原生界面
 // 右下角面板旁观:缩略图点开大屏模态框,含实时画面与访问历史)。
@@ -9,7 +9,7 @@
 // browser_press / browser_eval / browser_screenshot / browser_wait /
 // browser_back / browser_reload / browser_status / browser_close。
 
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { BrowserConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./register.js";
@@ -19,7 +19,7 @@ import { closeBrowser, sweepScreenshotDir, browserOverrides } from "./session.js
 export type { BrowserConfig } from "./types.js";
 export { profileConfig } from "./session.js";
 
-export const name = "trio-browser";
+export const name = "reef-browser";
 export const inject = ["tools"];
 const BROWSER_SCHEMA: ConfigSchema = {
   enabled: { type: "boolean", optional: true },
@@ -44,11 +44,11 @@ const DEFAULT_CONFIG = {
   headless: true,
   userDataDir: "", // 设置后登录态(Cookie/localStorage)持久化到该目录,跨 DSH 重启保留
   profiles: {}, // 命名浏览器配置: { work: { userDataDir, channel, headless }, personal: {...} }
-  screenshotDir: ".dsh-trio/screenshots",
-  downloadDir: ".dsh-trio/downloads",
+  screenshotDir: ".dsh-reef/screenshots",
+  downloadDir: ".dsh-reef/downloads",
   screenshotMaxAgeDays: 7, // 截图保留天数(0 = 不按时间清理)
   screenshotMaxCount: 200, // 截图保留数量上限(0 = 不按数量清理)
-  liveViewPath: "/trio/browser",
+  liveViewPath: "/reef/browser",
   maxTextChars: 20000,
   maxLinks: 50,
   timeoutMs: 30000,
@@ -63,7 +63,7 @@ const DEFAULT_CONFIG = {
  * 浏览器实例、标签页表、登录态(userDataDir)。插件 dispose 时全部关闭。
  */
 
-export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+export function apply(ctx: ReefContext, rawConfig: Record<string, any>) {
   const resolved = resolveConfig("browser", BROWSER_SCHEMA, DEFAULT_CONFIG, rawConfig) as BrowserConfig;
   if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
   const tools = ctx.get("tools");

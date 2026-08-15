@@ -1,31 +1,31 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/icons/source/icon-light.png">
-    <img src="assets/icons/source/icon-dark.png" width="128" height="128" alt="dsh-trio">
+    <img src="assets/icons/source/icon-dark.png" width="128" height="128" alt="dsh-reef">
   </picture>
 </p>
 
-<h1 align="center">dsh-trio</h1>
+<h1 align="center">dsh-reef</h1>
 
 <p align="center">
   DeepSeek Harness 全家桶:浏览器自动化 · MCP Server · GitHub/GitLab 集成 · 原生嵌入面板
 </p>
 
 <p align="center">
-  <a href="https://github.com/huey1in/trio"><img src="https://img.shields.io/github/stars/huey1in/trio" alt="GitHub stars"></a>
-  <a href="https://github.com/huey1in/trio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/huey1in/trio/ci.yml?label=CI" alt="CI"></a>
+  <a href="https://github.com/huey1in/reef"><img src="https://img.shields.io/github/stars/huey1in/reef" alt="GitHub stars"></a>
+  <a href="https://github.com/huey1in/reef/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/huey1in/reef/ci.yml?label=CI" alt="CI"></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX%20DO-社区-f0b752?style=flat-square" alt="LINUX DO"></a>
 </p>
 
 ---
 
-dsh-trio 是一个 DSH 插件 bundle,一次安装提供五个模块:
+dsh-reef 是一个 DSH 插件 bundle,一次安装提供五个模块:
 
 | 模块 | 做什么 | 入口 |
 | --- | --- | --- |
 | 🐋 **原生面板** | 注入 DSH 界面右下角:模块状态、浏览器实时画面、GitHub 事件看板、五模块设置区 | 自动注入,无需配置 |
 | 🧭 **浏览器自动化** | 共享 Playwright 浏览器:多标签、多 profile、下载/上传、Cookie、表单回放,21 个 `browser_*` 工具 | `browser_*` 工具 |
-| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端(Streamable HTTP + OAuth) | `http://127.0.0.1:3080/trio/mcp` |
+| 🔌 **MCP Server** | 把 DSH 的会话与 agent 反向暴露给任何 MCP 客户端(Streamable HTTP + OAuth) | `http://127.0.0.1:3080/reef/mcp` |
 | 🐙 **GitHub 集成** | 4 个只读工具 + webhook 自动 PR 评审 + issue 自动修复闭环 + 事件看板 | `github_*` 工具 + webhook |
 | 🦊 **GitLab 集成** | 3 个只读工具 + webhook 自动 MR 评审 | `gitlab_*` 工具 + webhook |
 
@@ -36,11 +36,11 @@ dsh-trio 是一个 DSH 插件 bundle,一次安装提供五个模块:
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-trio
+dsh plugin --profile web add dsh-reef
 ```
 
 重启 DSH 生效。不需要某个模块?在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里删掉对应行
-(`trio-browser` / `trio-mcp` / `trio-github` / `trio-gitlab` / `trio-console`)或给对应行加
+(`reef-browser` / `reef-mcp` / `reef-github` / `reef-gitlab` / `reef-console`)或给对应行加
 `config: { enabled: false }`。
 
 ---
@@ -96,7 +96,7 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 ```json
 {
   "mcpServers": {
-    "dsh": { "url": "http://127.0.0.1:3080/trio/mcp" }
+    "dsh": { "url": "http://127.0.0.1:3080/reef/mcp" }
   }
 }
 ```
@@ -111,7 +111,7 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
   `Authorization: Bearer <token>`;
 - **环境变量引用**:`authTokenEnv` 指向环境变量名;
 - **OAuth 2.0 client_credentials**:`oauthEnabled: true` + `MCP_CLIENT_ID` /
-  `MCP_CLIENT_SECRET`,token 端点 `/trio/mcp/oauth/token`,RFC 8414 发现端点
+  `MCP_CLIENT_SECRET`,token 端点 `/reef/mcp/oauth/token`,RFC 8414 发现端点
   `/.well-known/oauth-authorization-server`。
 
 ---
@@ -134,7 +134,7 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 > 否则会按 ISO-8859-1 编码变乱码;发布后回读校验。
 
 **Webhook 自动 PR 评审**:仓库 Settings → Webhooks 添加
-`http://<机器>:3080/trio/github/webhook`(Content type: application/json,
+`http://<机器>:3080/reef/github/webhook`(Content type: application/json,
 Secret 与 `GITHUB_WEBHOOK_SECRET` 一致,事件勾选 Pull requests)。PR 打开/更新时
 自动拉取 diff → 调用评审模型 → 以 COMMENT 评审提交。同一 PR 同一 head commit
 只评审一次(`reviewDedupe`,默认开启)。评审模型默认用 DSH 默认模型,可在面板
@@ -145,7 +145,7 @@ Secret 与 `GITHUB_WEBHOOK_SECRET` 一致,事件勾选 Pull requests)。PR 打�
 测试 → push → 自动开 PR。`autoFixLabels` 可限定只处理带特定标签的 issue。
 
 **事件看板**:面板 GitHub 行实时显示最近 webhook 事件,数据端点
-`GET /trio/github/events`。
+`GET /reef/github/events`。
 
 ---
 
@@ -162,7 +162,7 @@ Secret 与 `GITHUB_WEBHOOK_SECRET` 一致,事件勾选 Pull requests)。PR 打�
 > 写操作(建 issue/MR、评论)用 bash 跑 `glab` CLI 或 `curl` + `GITLAB_TOKEN`。
 
 **Webhook 自动 MR 评审**:仓库 Settings → Webhooks 添加
-`http://<机器>:3080/trio/gitlab/webhook`(Secret Token 与 `GITLAB_WEBHOOK_SECRET`
+`http://<机器>:3080/reef/gitlab/webhook`(Secret Token 与 `GITLAB_WEBHOOK_SECRET`
 一致,事件勾选 Merge Request)。MR 打开/更新时自动评审并以 note 发布(带 🤖 前缀)。
 自建 GitLab 实例:改 `apiBase`(如 `https://gitlab.example.com/api/v4`)。
 
@@ -179,10 +179,10 @@ DSH 界面右下角 ⚙,五个模块的配置全在面板里:
 
 - **凭据类**(GitHub/GitLab token、webhook 密钥、MCP 访问 token):优先写入 DSH
   凭据库(`$DSH_HOME/.credentials.yaml`,0600),部署未挂载凭据服务时回退到插件
-  自有存储(`$DSH_HOME/.dsh-trio/tokens.json`,0600)。凭据值永不回传页面;
+  自有存储(`$DSH_HOME/.dsh-reef/tokens.json`,0600)。凭据值永不回传页面;
   环境变量已提供时输入框自动禁用(环境变量优先级更高)。
 - **普通配置**(headless、浏览器通道、截图目录/保留策略、操作超时、评审模型、
-  自动评审事件等):写入 `$DSH_HOME/.dsh-trio/settings.json`(0600,字段白名单
+  自动评审事件等):写入 `$DSH_HOME/.dsh-reef/settings.json`(0600,字段白名单
   校验),使用时点读取**即时生效**;输入框留空 = 恢复默认。
 - **路径类**(标 ⟳):liveViewPath、webhookPath、MCP path、面板基路径——路由
   注册时生效,**改动需重启 DSH**。
@@ -193,26 +193,26 @@ DSH 界面右下角 ⚙,五个模块的配置全在面板里:
 ```yaml
 # $DSH_HOME/profiles/web/cordis.patch.yml
 - insert:
-    - id: trio-browser
-      name: dsh-trio/browser
+    - id: reef-browser
+      name: dsh-reef/browser
       config:
         channel: auto        # auto | msedge | chrome | chromium | ""(playwright 默认)
         executablePath: ""   # 显式指定浏览器可执行文件(优先于 channel)
         headless: true
         userDataDir: ""      # 设置后登录态跨 DSH 重启保留
-        screenshotDir: .dsh-trio/screenshots
+        screenshotDir: .dsh-reef/screenshots
         screenshotMaxAgeDays: 7   # 截图保留天数(0 = 不按时间清理)
         screenshotMaxCount: 200   # 截图保留数量上限(0 = 不按数量清理)
-        downloadDir: .dsh-trio/downloads
-        liveViewPath: /trio/browser
+        downloadDir: .dsh-reef/downloads
+        liveViewPath: /reef/browser
         maxTextChars: 20000
         maxLinks: 50
         timeoutMs: 30000
 
-    - id: trio-mcp
-      name: dsh-trio/mcp
+    - id: reef-mcp
+      name: dsh-reef/mcp
       config:
-        path: /trio/mcp
+        path: /reef/mcp
         authTokenEnv: ""            # 静态 Bearer token 环境变量名
         oauthEnabled: false
         oauthClientIdEnv: MCP_CLIENT_ID
@@ -221,12 +221,12 @@ DSH 界面右下角 ⚙,五个模块的配置全在面板里:
         runAgentMaxOutputChars: 120000
         listSessionsLimit: 50
 
-    - id: trio-github
-      name: dsh-trio/github
+    - id: reef-github
+      name: dsh-reef/github
       config:
         tokenEnv: GITHUB_TOKEN
         apiBase: https://api.github.com
-        webhookPath: /trio/github/webhook
+        webhookPath: /reef/github/webhook
         webhookSecretEnv: GITHUB_WEBHOOK_SECRET
         reviewModel: {}             # { provider, model },空则用默认模型
         reviewMaxDiffChars: 60000
@@ -236,17 +236,17 @@ DSH 界面右下角 ⚙,五个模块的配置全在面板里:
         autoFixLabels: []           # 非空时只处理带这些标签之一的 issue
         autoFixTimeoutMs: 600000
 
-    - id: trio-console
-      name: dsh-trio/console
+    - id: reef-console
+      name: dsh-reef/console
       config:
-        path: /trio                 # 面板/embed 基路径
+        path: /reef                 # 面板/embed 基路径
 
-    - id: trio-gitlab
-      name: dsh-trio/gitlab
+    - id: reef-gitlab
+      name: dsh-reef/gitlab
       config:
         tokenEnv: GITLAB_TOKEN
         apiBase: https://gitlab.com/api/v4
-        webhookPath: /trio/gitlab/webhook
+        webhookPath: /reef/gitlab/webhook
         webhookSecretEnv: GITLAB_WEBHOOK_SECRET
         reviewModel: {}
         reviewMaxDiffChars: 60000

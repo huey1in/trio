@@ -1,14 +1,14 @@
-// dsh-trio · GitHub — 工具注册(4 个只读 github_*)
+// dsh-reef · GitHub — 工具注册(4 个只读 github_*)
 //
 // 瘦身说明:写操作(建 issue/PR、评论、评审、合并)交给 agent 用 bash +
 // gh CLI(或 curl + GITHUB_TOKEN),插件只保留 4 个高频只读工具;
 // 常驻自动化(webhook 自动评审、issue 自动修复、事件看板)在 webhook.ts /
 // autofix.ts,是 bash 无法替代的部分。
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
 import { definePlainTool, genericCard } from "../lib/tools.js";
 import { ghFetch, projectIssue, projectPr } from "./api.js";
-export function registerTools(ctx: TrioContext, config: GithubConfig) {
+export function registerTools(ctx: ReefContext, config: GithubConfig) {
   const tools = ctx.get("tools");
   if (tools === undefined) return;
 

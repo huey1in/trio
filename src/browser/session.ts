@@ -1,4 +1,4 @@
-// dsh-trio · 浏览器 — 会话与标签页管理(多 profile、userDataDir 持久化、下载记录、访问历史、截图清理)
+// dsh-reef · 浏览器 — 会话与标签页管理(多 profile、userDataDir 持久化、下载记录、访问历史、截图清理)
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
@@ -111,7 +111,7 @@ export async function loadPlaywright(): Promise<typeof import("playwright-core")
     return await import("playwright-core");
   } catch {
     throw new Error(
-      "dsh-trio/browser: playwright-core is not installed. Run `dsh plugin --profile web add playwright-core` or install it in the profile.",
+      "dsh-reef/browser: playwright-core is not installed. Run `dsh plugin --profile web add playwright-core` or install it in the profile.",
     );
   }
 }
@@ -175,7 +175,7 @@ export async function launchProfile(name: string, config: BrowserConfig): Promis
     }
   }
   throw new Error(
-    `dsh-trio/browser: could not launch a Chromium-based browser. ` +
+    `dsh-reef/browser: could not launch a Chromium-based browser. ` +
       `Install one, set config executablePath, or run \`npx playwright install chromium\`. ` +
       `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   );
@@ -203,7 +203,7 @@ export async function newPage(config: BrowserConfig): Promise<Page> {
     attachPage(page, config);
     return page;
   }
-  throw new Error("dsh-trio/browser: browser session failed to start");
+  throw new Error("dsh-reef/browser: browser session failed to start");
 }
 
 /** 返回当前活动页面(没有则新建),并保证浏览器已启动。 */
@@ -217,7 +217,7 @@ export async function getPage(config: BrowserConfig): Promise<Page> {
     state.activeId = id;
   }
   const page = state.pages.get(state.activeId ?? -1);
-  if (page === undefined) throw new Error("dsh-trio/browser: no active page");
+  if (page === undefined) throw new Error("dsh-reef/browser: no active page");
   return page;
 }
 

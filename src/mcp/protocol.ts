@@ -1,6 +1,6 @@
-// dsh-trio · MCP — Streamable HTTP 协议层(JSON-RPC 分发、鉴权、SSE)
+// dsh-reef · MCP — Streamable HTTP 协议层(JSON-RPC 分发、鉴权、SSE)
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { McpConfig, ProgressFn, DeltaFn } from "./types.js";
 import { readJsonBody, sendJson, sendText, openSse, urlPath, type SseWriter } from "../lib/http.js";
 import { sectionOverrides } from "../lib/settings.js";
@@ -11,7 +11,7 @@ import { callMcpTool } from "./dispatch.js";
 import { handleOAuthToken, oauthMetadata, isOAuthEnabled, checkOAuthToken } from "./oauth.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
-const SERVER_NAME = "dsh-trio-mcp";
+const SERVER_NAME = "dsh-reef-mcp";
 const SERVER_VERSION = "1.0.1";
 const sseWriters = new Set<SseWriter>();
 
@@ -45,7 +45,7 @@ export function makeDeltaReporter(params: Record<string, any>): DeltaFn | undefi
   return (delta) => {
     pushNotification("notifications/message", {
       level: "info",
-      logger: "dsh-trio.run-agent",
+      logger: "dsh-reef.run-agent",
       data: { kind: "agent-delta", text: delta },
     });
   };
@@ -103,14 +103,14 @@ export function sendUnauthorized(res: ServerResponse, config: McpConfig, req: In
     headers["www-authenticate"] = `Bearer realm="${meta.issuer}"`;
     headers["x-oauth-server-metadata"] = `http://${host}/.well-known/oauth-authorization-server`;
   } else {
-    headers["www-authenticate"] = 'Bearer realm="dsh-trio-mcp"';
+    headers["www-authenticate"] = 'Bearer realm="dsh-reef-mcp"';
   }
   sendJson(res, 401, rpcError(null, -32001, "Unauthorized"), headers);
 }
 
-export async function handlePost(req: IncomingMessage, res: ServerResponse, ctx: TrioContext, config: McpConfig): Promise<void> {
+export async function handlePost(req: IncomingMessage, res: ServerResponse, ctx: ReefContext, config: McpConfig): Promise<void> {
   const path = urlPath(req);
-  const base = (config.path ?? "/trio/mcp").replace(/\/+$/, "");
+  const base = (config.path ?? "/reef/mcp").replace(/\/+$/, "");
   // token 端点是发证处,必须先于鉴权处理
   if (isOAuthEnabled(config) && path === `${base}/oauth/token`) {
     await handleOAuthToken(req, res, config);
@@ -230,7 +230,7 @@ export function handleGetWithConfig(req: IncomingMessage, res: ServerResponse, c
   const writer = openSse(res);
   sseWriters.add(writer);
   const host = req.headers.host ?? "127.0.0.1";
-  writer.send("endpoint", { uri: `http://${host}${config.path ?? "/trio/mcp"}` });
+  writer.send("endpoint", { uri: `http://${host}${config.path ?? "/reef/mcp"}` });
   const keepAlive = setInterval(() => writer.comment("keep-alive"), 15000);
   req.on("close", () => {
     clearInterval(keepAlive);

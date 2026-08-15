@@ -1,4 +1,4 @@
-// dsh-trio · 浏览器 — 类型定义
+// dsh-reef · 浏览器 — 类型定义
 import type { Browser, BrowserContext, Page } from "playwright-core";
 
 export interface BrowserConfig {

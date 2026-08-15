@@ -1,4 +1,4 @@
-// dsh-trio · GitLab — 类型
+// dsh-reef · GitLab — 类型
 /** GitLab 模块配置。 */
 export interface GitlabConfig {
   enabled?: boolean;

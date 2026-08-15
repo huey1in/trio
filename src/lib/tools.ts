@@ -1,4 +1,4 @@
-// dsh-trio shared helpers: workspace cwd resolution and plain tool definitions.
+// dsh-reef shared helpers: workspace cwd resolution and plain tool definitions.
 
 import type { PlainToolDefinition, ToolRunContext } from "./types.js";
 
@@ -54,7 +54,7 @@ export function definePlainTool(options: PlainToolOptions): PlainToolDefinition 
   return definition;
 }
 
-/** Generic card view used by most dsh-trio tools. */
+/** Generic card view used by most dsh-reef tools. */
 export function genericCard(kind: string, title: string, rawInput: string): unknown {
   return { card: "generic", kind, title, rawInput };
 }

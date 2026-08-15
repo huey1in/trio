@@ -31,7 +31,7 @@ describe("validateCredentialValue", () => {
 });
 
 describe("token 自有存储", () => {
-  const tempHome = mkdtempSync(join(tmpdir(), "dsh-trio-tokens-"));
+  const tempHome = mkdtempSync(join(tmpdir(), "dsh-reef-tokens-"));
   const prevHome = process.env.DSH_HOME;
 
   beforeAll(() => {
@@ -48,8 +48,8 @@ describe("token 自有存储", () => {
     }
   });
 
-  it("路径落在 DSH_HOME/.dsh-trio 下", () => {
-    expect(tokenStorePath()).toBe(join(tempHome, ".dsh-trio", "tokens.json"));
+  it("路径落在 DSH_HOME/.dsh-reef 下", () => {
+    expect(tokenStorePath()).toBe(join(tempHome, ".dsh-reef", "tokens.json"));
   });
 
   it("写入后可读回,空串清除", async () => {

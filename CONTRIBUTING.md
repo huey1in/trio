@@ -1,12 +1,12 @@
-# Contributing to dsh-trio
+# Contributing to dsh-reef
 
-感谢你愿意参与 dsh-trio 的开发!无论是一行文档、一个 bug 修复,还是一个全新工具,都欢迎。
+感谢你愿意参与 dsh-reef 的开发!无论是一行文档、一个 bug 修复,还是一个全新工具,都欢迎。
 
 ## 开发环境
 
 ```sh
-git clone https://github.com/huey1in/trio
-cd trio
+git clone https://github.com/huey1in/reef
+cd reef
 npm install        # 安装依赖(playwright-core + 开发工具链)
 ```
 

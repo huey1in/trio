@@ -1,4 +1,4 @@
-// dsh-trio · GitHub 集成
+// dsh-reef · GitHub 集成
 //
 // 4 个只读 GitHub REST API 工具(github_repo / github_issues / github_pulls /
 // github_pr)+ webhook 自动 PR 评审 + issue 自动修复闭环。写操作交给 agent
@@ -6,7 +6,7 @@
 // GITHUB_TOKEN),找不到时回退读进程环境变量;webhook 用 HMAC-SHA256 签名
 // 校验;评审由 ctx.llm 调用。
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
+import type { ReefContext, WebRoute } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./tools.js";
@@ -25,7 +25,7 @@ export { buildReviewPrompt } from "./review.js";
 export { projectIssue, projectPr } from "./api.js";
 export { encodeProject } from "./api.js";
 
-export const name = "trio-github";
+export const name = "reef-github";
 export const inject = ["tools"];
 
 const GITHUB_SCHEMA: ConfigSchema = {
@@ -46,7 +46,7 @@ const GITHUB_SCHEMA: ConfigSchema = {
 const DEFAULT_CONFIG = {
   tokenEnv: "GITHUB_TOKEN",
   apiBase: "https://api.github.com",
-  webhookPath: "/trio/github/webhook",
+  webhookPath: "/reef/github/webhook",
   webhookSecretEnv: "GITHUB_WEBHOOK_SECRET",
   reviewModel: {}, // { provider, model } — 空则用 agent 默认模型
   reviewMaxDiffChars: 60000,
@@ -59,10 +59,10 @@ const DEFAULT_CONFIG = {
   autoFixTimeoutMs: 600000,
 };
 
-function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
+function registerWebhook(ctx: ReefContext, config: GithubConfig): void {
   const webServer = ctx.get<{ register(route: WebRoute): () => void }>("webServer");
   if (webServer === undefined) return;
-  const base = (config.webhookPath ?? "/trio/github/webhook").replace(/\/+$/, "");
+  const base = (config.webhookPath ?? "/reef/github/webhook").replace(/\/+$/, "");
   const dispose = webServer.register({
     kind: "exact",
     path: base,
@@ -114,7 +114,7 @@ function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
   });
 }
 
-export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
+export function apply(ctx: ReefContext, rawConfig: Record<string, any>) {
   const resolved = resolveConfig("github", GITHUB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GithubConfig;
   if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
   // 面板设置覆盖:启动时合并 restart 字段(webhookPath)。

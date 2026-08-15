@@ -1,5 +1,5 @@
 {
-  "name": "dsh-trio",
+  "name": "dsh-reef",
   "version": "1.4.0",
   "description": "DSH 全家桶:浏览器自动化 + MCP Server + GitHub/GitLab 集成 + 原生 UI 嵌入面板。One install, three superpowers: browser automation, an MCP server that exposes your DeepSeek agents to any MCP client, and GitHub/GitLab automation.",
   "type": "module",

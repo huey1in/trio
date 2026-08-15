@@ -1,7 +1,7 @@
-// dsh-trio · GitHub — webhook 处理器(签名校验、事件记录、路由分发)
+// dsh-reef · GitHub — webhook 处理器(签名校验、事件记录、路由分发)
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext } from "../lib/types.js";
+import type { ReefContext } from "../lib/types.js";
 import type { GithubConfig, GithubEventEntry } from "./types.js";
 import { readRawBody, sendJson } from "../lib/http.js";
 import { sectionOverrides } from "../lib/settings.js";
@@ -75,7 +75,7 @@ export function extractPrRef(payload: Record<string, any>): Record<string, any> 
 }
 
 
-export async function handleWebhook(ctx: TrioContext, config: GithubConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleWebhook(ctx: ReefContext, config: GithubConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
   // 面板设置覆盖:webhookSecret(优先于环境变量),每次请求读取即时生效。
   const ov = sectionOverrides("github", GITHUB_SETTING_FIELDS);
   const panelSecret = typeof ov.webhookSecret === "string" && ov.webhookSecret ? ov.webhookSecret : "";
@@ -110,7 +110,7 @@ export async function handleWebhook(ctx: TrioContext, config: GithubConfig, req:
           await runAutoFix(ctx, config, issue);
         } catch (error) {
           ctx.logger?.warn?.(
-            `dsh-trio/github: auto-fix flow failed for ${fullName}#${issue.number}: ${error instanceof Error ? error.message : String(error)}`,
+            `dsh-reef/github: auto-fix flow failed for ${fullName}#${issue.number}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       })();
@@ -146,7 +146,7 @@ export async function handleWebhook(ctx: TrioContext, config: GithubConfig, req:
       await reviewPullRequest(ctx, config, pr);
     } catch (error) {
       ctx.logger?.warn?.(
-        `dsh-trio/github: webhook review failed for ${pr.owner}/${pr.repo}#${pr.number}: ${error instanceof Error ? error.message : String(error)}`,
+        `dsh-reef/github: webhook review failed for ${pr.owner}/${pr.repo}#${pr.number}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   })();
