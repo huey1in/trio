@@ -67,7 +67,7 @@ const CONSOLE_HTML = `<!doctype html>
     <div class="row"><span class="k">状态</span><span class="v" id="b-status">探测中…</span></div>
     <div class="row"><span class="k">标签页</span><span class="v" id="b-tabs">-</span></div>
     <div class="row"><span class="k">当前页面</span><span class="v" id="b-url">-</span></div>
-    <a class="btn" id="b-link" href="./browser" target="_blank">打开实时画面 ↗</a>
+    <a class="btn" id="b-link" href="javascript:void(0)" target="_blank" onclick="this.href = location.pathname.replace(/\/+$/, '') + '/browser'; return true;">打开实时画面 ↗</a>
   </section>
 
   <section class="card">
@@ -91,6 +91,12 @@ const CONSOLE_HTML = `<!doctype html>
 <footer>dsh-trio · DeepSeek Harness 全家桶 — 控制台仅显示状态,不承载业务数据。</footer>
 <script>
   const $ = (id) => document.getElementById(id);
+  // 当前控制台挂载路径(去掉尾斜杠);相对路径在无尾斜杠的 URL 下会解析错位
+  const base = location.pathname.replace(/\/+$/, '');
+  const bUrl = base + '/browser/status';
+  const mUrl = base + '/mcp';
+  const gUrl = base + '/github/webhook';
+  const geUrl = base + '/github/events';
   async function probe(url, opts) {
     try {
       const r = await fetch(url, { cache: 'no-store', ...opts });
@@ -99,7 +105,7 @@ const CONSOLE_HTML = `<!doctype html>
   }
   async function refresh() {
     // 浏览器
-    const b = await probe('./browser/status');
+    const b = await probe(bUrl);
     if (b.ok) {
       try {
         const s = JSON.parse(b.body);
@@ -114,7 +120,7 @@ const CONSOLE_HTML = `<!doctype html>
       $('b-link').style.display = 'none';
     }
     // MCP
-    const m = await probe('./mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
+    const m = await probe(mUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
     if (m.ok && m.body.includes('dsh-trio-mcp')) {
       $('m-dot').className = 'dot ok';
       try {
@@ -122,7 +128,7 @@ const CONSOLE_HTML = `<!doctype html>
         const r = msg.result || msg.error;
         $('m-ver').textContent = r?.protocolVersion ?? 'ok';
       } catch { $('m-ver').textContent = 'ok'; }
-      const tl = await probe('./mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
+      const tl = await probe(mUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
       if (tl.ok) {
         try { const n = JSON.parse(tl.body).result?.tools?.length ?? 0; $('m-tools').textContent = n + ' 个工具'; } catch {}
       }
@@ -133,7 +139,7 @@ const CONSOLE_HTML = `<!doctype html>
       $('m-test').style.display = 'none';
     }
     // GitHub
-    const g = await probe('./github/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'ping' }, body: JSON.stringify({ zen: 'console-probe' }) });
+    const g = await probe(gUrl, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'ping' }, body: JSON.stringify({ zen: 'console-probe' }) });
     if (g.status === 202 || g.status === 200) {
       $('g-dot').className = 'dot ok';
       $('g-status').textContent = '就绪 (HTTP ' + g.status + ')';
@@ -148,7 +154,7 @@ const CONSOLE_HTML = `<!doctype html>
       $('g-status').textContent = '无响应 (' + g.status + ')';
     }
     // GitHub 事件看板
-    const ge = await probe('./github/events');
+    const ge = await probe(geUrl);
     if (ge.ok) {
       try {
         const list = JSON.parse(ge.body).events || [];
@@ -167,7 +173,7 @@ const CONSOLE_HTML = `<!doctype html>
     }
   }
   $('m-test').addEventListener('click', async () => {
-    const m = await probe('./mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'initialize', params: {} }) });
+    const m = await probe(mUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'initialize', params: {} }) });
     $('m-ver').textContent = m.ok ? '连接成功 ✓' : '连接失败';
   });
   refresh();
