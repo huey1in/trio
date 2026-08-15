@@ -44,13 +44,14 @@ function readFabIcon(name: string): string {
 }
 
 function embedJs(base: string): string {
-  const iconDark = readFabIcon("icon-dark.png");
-  const iconLight = readFabIcon("icon-light.png");
+  // mark-dark = 墨黑鲸鱼(亮色主题用);mark-light = 白色鲸鱼(暗色主题用)。均为透明底。
+  const markDark = readFabIcon("mark-dark.png");
+  const markLight = readFabIcon("mark-light.png");
   return `(function () {
   "use strict";
   var base = ${JSON.stringify(base)};
   var B = base + "/browser", M = base + "/mcp", G = base + "/github", G2 = base + "/gitlab";
-  var ICON_DARK = ${JSON.stringify(iconDark)}, ICON_LIGHT = ${JSON.stringify(iconLight)};
+  var MARK_DARK = ${JSON.stringify(markDark)}, MARK_LIGHT = ${JSON.stringify(markLight)};
 
   // —— 挂载(等 body 就绪) ——
   var root = null, btn = null, panel = null, open = false, shot = null, eventsBox = null;
@@ -61,7 +62,7 @@ function embedJs(base: string): string {
     s.textContent = [
       "#dsh-trio-fab{position:fixed;right:16px;bottom:16px;z-index:2147483000;width:40px;height:40px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 16px var(--dsw-alias-bg-mask-2);transition:background .15s ease}",
       "#dsh-trio-fab:hover{background:var(--dsw-alias-button-floating-hover)}",
-      ".trio-fab-icon{width:28px;height:28px;border-radius:7px;object-fit:cover;display:block}",
+      ".trio-fab-icon{width:26px;height:26px;object-fit:contain;display:block}",
       "#dsh-trio-panel,#dsh-trio-panel *,.trio-modal-box,.trio-modal-box *{box-sizing:border-box}",
       "#dsh-trio-panel{position:fixed;right:16px;bottom:64px;z-index:2147483000;width:320px;max-height:70vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;display:none;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:0 8px 32px var(--dsw-alias-bg-mask-2);padding:12px}",
       "#dsh-trio-panel::-webkit-scrollbar{display:none}",
@@ -423,14 +424,14 @@ function embedJs(base: string): string {
     if (root !== null) return;
     css();
     btn = el("button", null); btn.id = "dsh-trio-fab"; btn.title = "dsh-trio";
-    // 悬浮按钮图标:跟随 DSH 主题切换暗/亮版本(回退 🐋 表情)。
+    // 悬浮按钮图标:跟随 DSH 主题切换(暗色主题→白色鲸鱼,亮色主题→墨黑鲸鱼);透明底,回退 🐋。
     function applyFabTheme() {
       if (fabImg === null) return;
       var dark = document.body.getAttribute("data-ds-dark-theme") !== null;
-      fabImg.src = dark ? ICON_DARK : ICON_LIGHT;
+      fabImg.src = dark ? MARK_LIGHT : MARK_DARK;
     }
     var fabImg = null;
-    if (ICON_DARK && ICON_LIGHT) {
+    if (MARK_DARK && MARK_LIGHT) {
       fabImg = document.createElement("img");
       fabImg.className = "trio-fab-icon";
       fabImg.alt = "dsh-trio";
