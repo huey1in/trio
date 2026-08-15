@@ -129,7 +129,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:github",
     order: 201,
-    text: "GitHub 只读工具(github_repo / github_issues / github_pulls / github_pr)访问 GitHub REST API;公共仓库无需 token(匿名 60 次/小时),配置 GITHUB_TOKEN 后无此限制且可访问私有仓库。写操作(创建 issue/PR、评论、评审、合并)用 bash 配合 gh CLI 或 curl + GITHUB_TOKEN 完成。引用 PR/issue 时给出 #编号与链接。",
+    text: "GitHub 只读工具(github_repo / github_issues / github_pulls / github_pr)访问 GitHub REST API;公共仓库无需 token(匿名 60 次/小时),配置 GITHUB_TOKEN 后无此限制且可访问私有仓库。写操作(创建 issue/PR、评论、评审、合并)用 bash 配合 gh CLI(优先,UTF-8 安全)或 curl + GITHUB_TOKEN 完成。警告:Windows PowerShell 的 Invoke-RestMethod/Invoke-WebRequest 发含中文的 JSON body 会按 ISO-8859-1 编码变成乱码,必须用 [System.Text.Encoding]::UTF8.GetBytes($json) 传字节流,或改用 gh CLI;发布中文内容后回读一次校验无乱码,乱码立即删除重发。引用 PR/issue 时给出 #编号与链接。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

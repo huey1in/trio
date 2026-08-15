@@ -104,7 +104,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:gitlab",
     order: 202,
-    text: "GitLab 只读工具(gitlab_project / gitlab_issues / gitlab_mr_list)通过 GITLAB_TOKEN 访问 GitLab REST API。写操作(创建 issue/MR、评论)用 bash 配合 glab CLI 或 curl + GITLAB_TOKEN 完成。引用 issue/MR 时给出 !编号与链接。",
+    text: "GitLab 只读工具(gitlab_project / gitlab_issues / gitlab_mr_list)通过 GITLAB_TOKEN 访问 GitLab REST API。写操作(创建 issue/MR、评论)用 bash 配合 glab CLI(优先,UTF-8 安全)或 curl + GITLAB_TOKEN 完成。警告:Windows PowerShell 的 Invoke-RestMethod/Invoke-WebRequest 发含中文的 JSON body 会按 ISO-8859-1 编码变成乱码,必须用 [System.Text.Encoding]::UTF8.GetBytes($json) 传字节流,或改用 glab CLI;发布中文内容后回读一次校验无乱码,乱码立即删除重发。引用 issue/MR 时给出 !编号与链接。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

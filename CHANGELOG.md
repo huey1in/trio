@@ -7,6 +7,12 @@
 
 ### 新增
 
+- **写操作编码防坑提示**:GitHub/GitLab 模块的 systemPrompt 增加提醒——
+  Windows PowerShell 发含中文的 JSON body 会按 ISO-8859-1 编码变乱码,
+  必须 `[System.Text.Encoding]::UTF8.GetBytes()` 传字节流或改用 `gh`/`glab`
+  CLI;发布中文后回读校验,乱码立即删除重发(防止 agent 用
+  Invoke-RestMethod 发评论时中文乱码)。
+
 - **面板设置区扩展(五模块配置)**:除 GitHub/GitLab token 外,⚙ 设置区现在
   覆盖全部五个模块:
   - **浏览器**:headless 开关、浏览器通道、截图目录、截图保留天数/数量、

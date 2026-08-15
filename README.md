@@ -204,6 +204,9 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 > 只保留 4 个高频**只读**工具。写操作(建 issue/PR、评论、评审、合并、
 > CI 状态等)让 agent 用 bash 跑 `gh` CLI 或 `curl` + `GITHUB_TOKEN` 完成,
 > 与工具层功能等价且更灵活;插件专注 bash 做不到的常驻自动化。
+> 提示词已内置防坑提醒:Windows PowerShell 发中文 JSON body 必须用
+> `[System.Text.Encoding]::UTF8.GetBytes()` 传字节流或直接 `gh` CLI,
+> 发布后回读校验防乱码。
 
 **Webhook 评审去重**:同一 PR 的同一 head commit 只评审一次(`reviewDedupe`,
 默认开启),`synchronize` 推送新 commit 才会触发新一轮评审。
