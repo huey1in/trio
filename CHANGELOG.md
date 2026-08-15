@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-15
+
 ### 变更
 
 - **项目更名 dsh-trio → dsh-reef**:包名、模块名(reef-browser / reef-mcp /
