@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/icons/source/icon-light.png">
-    <img src="assets/icons/source/icon-dark.png" width="128" height="128" alt="dsh-reef">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icons/readme/icon-dark.png">
+    <img src="assets/icons/readme/icon-light.png" width="128" height="128" alt="dsh-reef" style="border-radius: 28px">
   </picture>
 </p>
 
