@@ -190,7 +190,9 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 ## 🐙 GitHub 集成
 
 凭证:环境变量或 DSH credentials 里的 `GITHUB_TOKEN`(细粒度 token 只需
-`repo` 权限)。
+`repo` 权限)。**不配 token 也能用 4 个只读工具**——公共仓库走匿名访问
+(每 IP 60 次/小时,403 限流);写操作与 webhook 自动评审/issue 自动修复
+必须配 token。
 
 | 工具 | 说明 |
 | --- | --- |

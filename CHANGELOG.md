@@ -7,6 +7,9 @@
 
 ### 变更
 
+- **GitHub 只读工具免 token**:github_repo / github_issues / github_pulls /
+  github_pr 在未配置 GITHUB_TOKEN 时改用匿名访问(公共仓库,每 IP 60 次/
+  小时,403 限流时错误信息附带提示);写操作与自动化仍要求 token。
 - **GitHub/GitLab 工具瘦身**:CRUD 写工具(建 issue/PR、评论、评审、合并、
   行内评论、搜索、CI 状态等)全部移除,由 agent 用 bash + `gh`/`glab` CLI
   完成;只保留 4 个 GitHub 只读工具(github_repo / github_issues /

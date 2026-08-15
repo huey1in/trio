@@ -113,7 +113,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   const sectionDispose = systemPrompt?.section?.({
     name: "tool:github",
     order: 201,
-    text: "GitHub 只读工具(github_repo / github_issues / github_pulls / github_pr)通过 GITHUB_TOKEN 访问 GitHub REST API。写操作(创建 issue/PR、评论、评审、合并)用 bash 配合 gh CLI 或 curl + GITHUB_TOKEN 完成。引用 PR/issue 时给出 #编号与链接。",
+    text: "GitHub 只读工具(github_repo / github_issues / github_pulls / github_pr)访问 GitHub REST API;公共仓库无需 token(匿名 60 次/小时),配置 GITHUB_TOKEN 后无此限制且可访问私有仓库。写操作(创建 issue/PR、评论、评审、合并)用 bash 配合 gh CLI 或 curl + GITHUB_TOKEN 完成。引用 PR/issue 时给出 #编号与链接。",
   });
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);

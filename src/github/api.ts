@@ -21,27 +21,29 @@ export async function resolveToken(ctx: TrioContext, config: GithubConfig): Prom
 
 export async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {
   const token = await resolveToken(ctx, config);
-  if (!token) {
+  const method = options.method ?? "GET";
+  // 只读请求允许匿名(公共仓库 60 次/小时);写操作必须带 token。
+  if (!token && method !== "GET") {
     throw new Error(
       `GitHub token not configured: set env ${config.tokenEnv} (or via DSH credentials).`,
     );
   }
   const headers: Record<string, string> = {
-    authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
     "user-agent": "dsh-trio",
   };
+  if (token) headers.authorization = `Bearer ${token}`;
   let body;
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
   }
   let response: Response;
-  const retries = options.method === "GET" ? 2 : 0;
+  const retries = method === "GET" ? 2 : 0;
   for (let attempt = 0; ; attempt++) {
     try {
       response = await fetch(`${config.apiBase}${pathname}`, {
-        method: options.method ?? "GET",
+        method,
         headers,
         body,
         signal,
@@ -67,8 +69,11 @@ export async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: 
     data = { raw: text.slice(0, 500) };
   }
   if (!response.ok) {
+    const hint = !token && response.status === 403
+      ? " (anonymous access is rate-limited to 60 req/h per IP; set GITHUB_TOKEN to lift)"
+      : "";
     throw new Error(
-      `GitHub API ${response.status} ${response.statusText} for ${pathname}: ${JSON.stringify(data).slice(0, 500)}`,
+      `GitHub API ${response.status} ${response.statusText} for ${pathname}: ${JSON.stringify(data).slice(0, 500)}${hint}`,
     );
   }
   return data;
