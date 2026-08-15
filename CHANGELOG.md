@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-15
+
+### 修复
+
+- **browser_status 输出校验失败**:DSH 对工具返回值按 `outputSchema` 严格校验
+  (additionalProperties: false),browser_status 的 schema 停留在旧版——缺少
+  `profile`/`tabs`/`profiles` 字段,又无条件要求 `url`/`title`(浏览器关闭时
+  不存在),导致每次调用都报 INVALID_TOOL_OUTPUT。schema 已与实际返回值对齐。
+- **browser_profile use 动作**:切换 profile 时返回的 `profiles` 是字符串数组,
+  与 schema 声明的对象数组不符;现在 list/use 两个动作统一返回完整对象数组。
+- **默认输出 schema 放宽**:未显式声明 outputSchema 的工具默认 schema 从
+  `additionalProperties: false + properties: {}`(任何返回都会校验失败)改为
+  宽松对象,避免未来新增工具踩同样的坑。
+
 ## [1.1.1] - 2026-08-15
 
 ### 修复

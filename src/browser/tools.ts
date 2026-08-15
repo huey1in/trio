@@ -386,20 +386,19 @@ export async function formsTool(args: Record<string, any>) {
 export async function profileTool(config: BrowserConfig, args: Record<string, any>) {
   const action = args.action ?? "list";
   const available = Object.keys(config.profiles ?? {});
-  if (action === "list") {
+  // 与 outputSchema 保持一致:profiles 永远是对象数组,不随动作变化。
+  const describe = (name: string) => {
+    const state = getProfileState(name);
     return {
-      current: currentProfile,
-      profiles: available.map((name) => {
-        const state = getProfileState(name);
-        return {
-          name,
-          open: state.browser !== null || state.context !== null,
-          tabs: state.pages.size,
-          persistent: state.persistent,
-          userDataDir: profileConfig(config, name).userDataDir ?? "",
-        };
-      }),
+      name,
+      open: state.browser !== null || state.context !== null,
+      tabs: state.pages.size,
+      persistent: state.persistent,
+      userDataDir: profileConfig(config, name).userDataDir ?? "",
     };
+  };
+  if (action === "list") {
+    return { current: currentProfile, profiles: available.map(describe) };
   }
   if (action === "use") {
     const name = String(args.name ?? "");
@@ -407,7 +406,7 @@ export async function profileTool(config: BrowserConfig, args: Record<string, an
       throw new Error(`unknown profile: ${name} (available: ${["default", ...available].join(", ")})`);
     }
     setCurrentProfile(name);
-    return { current: currentProfile, profiles: available };
+    return { current: currentProfile, profiles: available.map(describe) };
   }
   throw new Error(`unknown profile action: ${action}`);
 }

@@ -305,11 +305,14 @@ export function registerTools(ctx: TrioContext, config: BrowserConfig) {
         additionalProperties: false,
         properties: {
           open: { type: "boolean" },
+          profile: { type: "string" },
           channel: { type: "string" },
+          tabs: { type: "integer" },
+          profiles: { type: "array", items: { type: "object" } },
           url: { type: "string" },
           title: { type: "string" },
         },
-        required: ["open", "channel", "url", "title"],
+        required: ["open", "profile", "channel", "tabs", "profiles"],
       },
       render: (_args, value) =>
         value.open ? `Open (${value.channel}): ${value.url} — ${value.title}` : "Not open",

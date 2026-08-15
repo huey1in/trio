@@ -40,10 +40,9 @@ export function definePlainTool(options: PlainToolOptions): PlainToolDefinition 
     description: options.description,
     parameters: options.parameters,
     output: {
+      // 默认 schema 保持宽松:显式声明 outputSchema 的工具才会被严格校验。
       schema: options.outputSchema ?? {
         type: "object",
-        additionalProperties: false,
-        properties: {},
       },
       render: (args, value) => [{ type: "text", text: render(args, value) }],
     },
