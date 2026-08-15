@@ -98,7 +98,14 @@ export async function evalTool(config: BrowserConfig, args: Record<string, any>)
   const wrapped = /[\n;]|^\s*return\b/.test(script)
     ? `(async () => {\n${script}\n})()`
     : `(${script})`;
-  const result = await page.evaluate(wrapped);
+  const raw = await page.evaluate(wrapped);
+  // 净化成 lossless JSON:去掉原型链/函数/DOM 引用,无法序列化的降级为字符串。
+  let result: unknown;
+  try {
+    result = JSON.parse(JSON.stringify(raw ?? null));
+  } catch {
+    result = raw === undefined ? null : String(raw);
+  }
   return { result };
 }
 

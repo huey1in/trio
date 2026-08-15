@@ -6,3 +6,4 @@ dist/
 .DS_Store
 e2e.patch.yml
 tsconfig.tsbuildinfo
+.npmrc
