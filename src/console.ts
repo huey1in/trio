@@ -105,8 +105,10 @@ function embedJs(base: string): string {
       ".trio-setsec{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l2)}",
       ".trio-setbody{display:flex;flex-direction:column;gap:6px}",
       ".trio-setcheck{width:14px;height:14px;flex:none;accent-color:var(--dsw-alias-state-success-primary)}",
-      ".trio-setbtn-save{height:24px;flex:none;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}",
+      ".trio-setbtn-save{height:24px;flex:none;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease}",
       ".trio-setbtn-save:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".trio-setbtn-save.dirty{background:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary);color:#fff}",
+      ".trio-setbtn-save.dirty:hover{background:var(--dsw-alias-state-success-primary);color:#fff}",
     ].join("\\n");
     document.head.appendChild(s);
   }
@@ -159,11 +161,13 @@ function embedJs(base: string): string {
     var head = el("div", "trio-sethead");
     var labelText = field.label + (field.restart ? " ⟳重启生效" : "");
     var input = null;
+    var initial = "";
     if (field.type === "boolean") {
       input = document.createElement("input");
       input.type = "checkbox";
       input.className = "trio-setcheck";
       input.checked = field.value === true;
+      initial = String(field.value === true);
       head.appendChild(input);
       head.appendChild(el("span", "trio-setlabel", labelText));
     } else {
@@ -172,7 +176,7 @@ function embedJs(base: string): string {
       head.appendChild(status);
     }
     row.appendChild(head);
-    if (field.type === "boolean") return { row: row, input: input, field: field, status: null };
+    if (field.type === "boolean") return { row: row, input: input, field: field, status: null, initial: initial };
     if (field.type === "enum") {
       input = document.createElement("select");
       input.className = "trio-setinput";
@@ -192,20 +196,37 @@ function embedJs(base: string): string {
         input.autocomplete = "new-password";
         input.spellcheck = false;
         if (head.lastChild) head.lastChild.textContent = field.configured ? "已设置 ✓" : "未设置";
+        initial = "";
       } else {
         input.value = field.value === undefined || field.value === null ? "" : String(field.value);
         input.placeholder = "空=恢复默认";
       }
+      initial = input.value;
     }
     row.appendChild(input);
-    return { row: row, input: input, field: field, status: head.children[head.children.length - 1] };
+    return { row: row, input: input, field: field, status: head.children[head.children.length - 1], initial: initial };
+  }
+  function currentFieldValue(entry) {
+    if (entry.field.type === "boolean") return String(entry.input.checked);
+    return entry.input.value;
+  }
+  function updateDirty(sec) {
+    var dirty = sec.tokenInput !== null && sec.tokenInput.value !== "";
+    if (!dirty) {
+      for (var i = 0; i < sec.entries.length; i++) {
+        var e = sec.entries[i];
+        if (currentFieldValue(e) !== e.initial) { dirty = true; break; }
+      }
+    }
+    sec.dirty = dirty;
+    sec.save.className = "trio-setbtn-save" + (dirty ? " dirty" : "");
   }
   function renderSection(def, sec) {
     sec.body.innerHTML = "";
     sec.entries = [];
     sec.tokenInput = null;
     var d = def.data;
-    if (!d) { sec.status.textContent = def.error || "模块未启用"; return; }
+    if (!d) { sec.status.textContent = def.error || "模块未启用"; updateDirty(sec); return; }
     sec.status.textContent = "";
     if (d.token) {
       var t = d.token;
@@ -221,6 +242,7 @@ function embedJs(base: string): string {
       tinput.spellcheck = false;
       tinput.placeholder = t.configured ? "已设置(不回显)" : "粘贴 token";
       tinput.disabled = t.writable === false;
+      tinput.addEventListener("input", function () { updateDirty(sec); });
       trow.appendChild(thead);
       trow.appendChild(tinput);
       sec.body.appendChild(trow);
@@ -228,9 +250,13 @@ function embedJs(base: string): string {
     }
     for (var i = 0; i < (d.fields || []).length; i++) {
       var entry = buildFieldRow(d.fields[i]);
+      if (entry.input !== null) {
+        entry.input.addEventListener(entry.field.type === "boolean" ? "change" : "input", function () { updateDirty(sec); });
+      }
       sec.entries.push(entry);
       sec.body.appendChild(entry.row);
     }
+    updateDirty(sec);
   }
   function refreshSettings() {
     for (var i = 0; i < SET_SECTIONS.length; i++) {
@@ -240,8 +266,9 @@ function embedJs(base: string): string {
           else {
             try { def.data = JSON.parse(r.body); def.error = ""; } catch (e) { def.data = null; def.error = "响应异常"; }
           }
-          renderSection(def, sec);
-        }).catch(function () { def.data = null; def.error = "连接失败"; renderSection(def, sec); });
+          // 有未保存改动时跳过重渲染,保留用户编辑与高亮按钮。
+          if (!sec.dirty) renderSection(def, sec);
+        }).catch(function () { def.data = null; def.error = "连接失败"; if (!sec.dirty) renderSection(def, sec); });
       })(SET_SECTIONS[i], setSections[SET_SECTIONS[i].key]);
     }
   }
@@ -302,7 +329,7 @@ function embedJs(base: string): string {
       box.appendChild(head);
       box.appendChild(body);
       settingsBox.appendChild(box);
-      var sec = { box: box, body: body, status: status, entries: [], tokenInput: null };
+      var sec = { box: box, body: body, status: status, save: save, entries: [], tokenInput: null, dirty: false };
       setSections[def.key] = sec;
       save.addEventListener("click", function (d, s) { return function () { saveSection(d, s); }; }(def, sec));
     }
