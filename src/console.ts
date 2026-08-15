@@ -46,6 +46,7 @@ function embedJs(base: string): string {
     s.textContent = [
       "#dsh-trio-fab{position:fixed;right:16px;bottom:16px;z-index:2147483000;width:40px;height:40px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 16px var(--dsw-alias-bg-mask-2);transition:background .15s ease}",
       "#dsh-trio-fab:hover{background:var(--dsw-alias-button-floating-hover)}",
+      "#dsh-trio-panel,#dsh-trio-panel *,.trio-modal-box,.trio-modal-box *{box-sizing:border-box}",
       "#dsh-trio-panel{position:fixed;right:16px;bottom:64px;z-index:2147483000;width:320px;max-height:70vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;display:none;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:0 8px 32px var(--dsw-alias-bg-mask-2);padding:12px}",
       "#dsh-trio-panel::-webkit-scrollbar{display:none}",
       "#dsh-trio-panel.open{display:flex}",
@@ -84,13 +85,15 @@ function embedJs(base: string): string {
       ".trio-history .u{overflow:hidden;text-overflow:ellipsis}",
       ".trio-gear{width:28px;height:28px;flex:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:1}",
       ".trio-gear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
-      ".trio-settings{display:none;flex-direction:column;gap:8px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:8px}",
-      ".trio-settings.on{display:flex}",
-      ".trio-settings-title{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      // 设置区:grid-template-rows 0fr→1fr 实现向下延伸的过渡动画(精确到内容高度)。
+      ".trio-settings{display:grid;grid-template-rows:0fr;opacity:0;overflow:hidden;transition:grid-template-rows .3s ease,opacity .24s ease}",
+      ".trio-settings.on{grid-template-rows:1fr;opacity:1}",
+      ".trio-settings-inner{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:8px}",
+      ".trio-settings-title{margin-top:8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
       ".trio-setrow{display:flex;flex-direction:column;gap:4px}",
-      ".trio-sethead{display:flex;align-items:center;gap:8px}",
-      ".trio-setlabel{flex:1;color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5}",
-      ".trio-setstatus{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
+      ".trio-sethead{display:flex;align-items:center;gap:8px;min-width:0}",
+      ".trio-setlabel{flex:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5}",
+      ".trio-setstatus{flex:none;max-width:50%;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
       ".trio-setinput{width:100%;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}",
       ".trio-setinput:focus{outline:none;border-color:var(--dsw-alias-label-primary)}",
       ".trio-setinput:disabled{opacity:.5;cursor:not-allowed}",
@@ -100,7 +103,7 @@ function embedJs(base: string): string {
       ".trio-setbtn:disabled{opacity:.5;cursor:default}",
       ".trio-setsec{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l2)}",
       ".trio-setbody{display:flex;flex-direction:column;gap:6px}",
-      ".trio-setcheck{width:14px;height:14px;accent-color:var(--dsw-alias-state-success-primary)}",
+      ".trio-setcheck{width:14px;height:14px;flex:none;accent-color:var(--dsw-alias-state-success-primary)}",
       ".trio-setbtn-save{height:24px;flex:none;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}",
       ".trio-setbtn-save:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
     ].join("\\n");
@@ -284,7 +287,9 @@ function embedJs(base: string): string {
   }
   function buildSettings() {
     settingsBox = el("div", "trio-settings");
-    settingsBox.appendChild(el("div", "trio-settings-title", "模块配置 · 保存即时生效(标 ⟳ 的路径类改动需重启 DSH);凭据/密钥不回显"));
+    var inner = el("div", "trio-settings-inner");
+    settingsBox.appendChild(inner);
+    inner.appendChild(el("div", "trio-settings-title", "模块配置 · 保存即时生效(标 ⟳ 的路径类改动需重启 DSH);凭据/密钥不回显"));
     for (var i = 0; i < SET_SECTIONS.length; i++) {
       var def = SET_SECTIONS[i];
       var box = el("div", "trio-setsec");
@@ -296,7 +301,7 @@ function embedJs(base: string): string {
       var body = el("div", "trio-setbody");
       box.appendChild(head);
       box.appendChild(body);
-      settingsBox.appendChild(box);
+      inner.appendChild(box);
       var sec = { box: box, body: body, status: status, entries: [], tokenInput: null };
       setSections[def.key] = sec;
       save.addEventListener("click", function (d, s) { return function () { saveSection(d, s); }; }(def, sec));
