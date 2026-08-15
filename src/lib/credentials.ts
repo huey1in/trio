@@ -9,9 +9,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { TrioContext, WebRoute } from "../lib/types.js";
-import { readRawBody, sendJson, sendText } from "./http.js";
+import type { TrioContext } from "../lib/types.js";
 
 interface CredentialsSeam {
   resolve(ref: string): Promise<{ value?: string; source?: string } | undefined>;
@@ -80,97 +78,59 @@ export function validateCredentialValue(value: unknown): string | { error: strin
   return value;
 }
 
-/**
- * 注册 `<base>/settings` 端点(GET 状态 / POST 保存或清除),返回 disposer。
- * ref 固定为模块自己的 tokenEnv,客户端不能指定任意 ref。
- */
-export function registerCredentialSettings(
-  ctx: TrioContext,
-  base: string,
-  tokenEnv: string,
-  label: string,
-): () => void {
-  const webServer = ctx.get<{ register(route: WebRoute): () => void }>("webServer");
-  if (webServer === undefined) return () => {};
-  const settingsPath = `${base.replace(/\/+$/, "")}/settings`;
+/** 实际可用的后端:credentials 服务(挂载时)或插件自有存储。 */
+async function usableBackend(ctx: TrioContext, tokenEnv: string): Promise<"credentials" | "store"> {
   const credentials = ctx.get("credentials") as CredentialsSeam | undefined;
-
-  /** 实际可用的后端:credentials 服务(挂载时)或插件自有存储。 */
-  async function usableBackend(): Promise<"credentials" | "store"> {
-    if (credentials !== undefined) {
-      try {
-        await credentials.describe(tokenEnv);
-        return "credentials";
-      } catch {
-        /* 服务异常,回退自有存储 */
-      }
+  if (credentials !== undefined) {
+    try {
+      await credentials.describe(tokenEnv);
+      return "credentials";
+    } catch {
+      /* 服务异常,回退自有存储 */
     }
-    return "store";
   }
+  return "store";
+}
 
-  async function statusOf(): Promise<Record<string, unknown>> {
-    const status: Record<string, unknown> = { ref: tokenEnv, label, configured: false, source: "", writable: true };
-    const backend = await usableBackend();
-    if (backend === "credentials" && credentials !== undefined) {
-      const desc = await credentials.describe(tokenEnv);
+/** token 配置状态(面板展示用,永不回传值)。 */
+export async function credentialStatus(
+  ctx: TrioContext,
+  tokenEnv: string,
+  label?: string,
+): Promise<Record<string, unknown>> {
+  const credentials = ctx.get("credentials") as CredentialsSeam | undefined;
+  const status: Record<string, unknown> = { ref: tokenEnv, configured: false, source: "", writable: true };
+  if (label !== undefined) status.label = label;
+  const backend = await usableBackend(ctx, tokenEnv);
+  if (backend === "credentials" && credentials !== undefined) {
+    const desc = await credentials.describe(tokenEnv);
+    status.configured = desc.configured;
+    status.source = desc.source ?? "";
+    status.writable = desc.writable !== false;
+  }
+  if (!status.configured) {
+    const envValue = process.env[tokenEnv];
+    if (envValue) {
+      status.configured = true;
+      status.source = "env";
+      status.writable = false;
+    } else {
+      const desc = await describeStoredToken(tokenEnv);
       status.configured = desc.configured;
-      status.source = desc.source ?? "";
-      status.writable = desc.writable !== false;
+      status.source = desc.source;
     }
-    if (!status.configured) {
-      const envValue = process.env[tokenEnv];
-      if (envValue) {
-        status.configured = true;
-        status.source = "env";
-        status.writable = false;
-      } else {
-        const desc = await describeStoredToken(tokenEnv);
-        status.configured = desc.configured;
-        status.source = desc.source;
-      }
-    }
-    return status;
   }
+  return status;
+}
 
-  const dispose = webServer.register({
-    kind: "exact",
-    path: settingsPath,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      const method = req.method ?? "GET";
-      if (method === "GET") {
-        sendJson(res, 200, await statusOf());
-        return;
-      }
-      if (method === "POST") {
-        let body: Record<string, unknown> = {};
-        try {
-          body = JSON.parse((await readRawBody(req, 8 * 1024)) || "{}");
-        } catch {
-          sendJson(res, 400, { error: "invalid JSON" });
-          return;
-        }
-        const checked = validateCredentialValue(body.value);
-        if (typeof checked === "object") {
-          sendJson(res, 400, checked);
-          return;
-        }
-        const backend = await usableBackend();
-        try {
-          if (backend === "credentials" && credentials !== undefined) {
-            if (checked === "") await credentials.unset(tokenEnv);
-            else await credentials.set(tokenEnv, checked);
-          } else {
-            await writeStoredToken(tokenEnv, checked);
-          }
-          const status = await statusOf();
-          sendJson(res, 200, { ok: true, ...status });
-        } catch (error) {
-          sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
-        }
-        return;
-      }
-      sendText(res, 405, "method not allowed");
-    },
-  });
-  return dispose;
+/** 写入或清除 token(credentials 服务 → 自有存储回退)。空串 = 清除。 */
+export async function writeCredential(ctx: TrioContext, tokenEnv: string, value: string): Promise<void> {
+  const credentials = ctx.get("credentials") as CredentialsSeam | undefined;
+  const backend = await usableBackend(ctx, tokenEnv);
+  if (backend === "credentials" && credentials !== undefined) {
+    if (value === "") await credentials.unset(tokenEnv);
+    else await credentials.set(tokenEnv, value);
+  } else {
+    await writeStoredToken(tokenEnv, value);
+  }
 }

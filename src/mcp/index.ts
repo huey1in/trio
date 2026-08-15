@@ -19,6 +19,8 @@ import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { handlePost, handleGetWithConfig } from "./protocol.js";
 import { oauthMetadata, isOAuthEnabled } from "./oauth.js";
 import { urlPath, sendText, sendJson } from "../lib/http.js";
+import { handleModuleSettings, sectionOverrides } from "../lib/settings.js";
+import { MCP_SETTING_FIELDS } from "./settings.js";
 
 export type { McpConfig } from "./types.js";
 export { summarize, truncate, projectEvent } from "./sessions.js";
@@ -57,10 +59,16 @@ const DEFAULT_CONFIG = {
 };
 
 export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
-  const config = resolveConfig("mcp", MCP_SCHEMA, DEFAULT_CONFIG, rawConfig) as import("./types.js").McpConfig;
-  if (typeof config.enabled === "boolean" && !config.enabled) return;
+  const resolved = resolveConfig("mcp", MCP_SCHEMA, DEFAULT_CONFIG, rawConfig) as import("./types.js").McpConfig;
+  if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
   const webServer = ctx.get<{ register(route: WebRoute): () => void; port?: number }>("webServer");
   if (webServer === undefined) return;
+  // 面板设置覆盖:启动时合并 restart 字段(path)。
+  const ov = sectionOverrides("mcp", MCP_SETTING_FIELDS);
+  const config = {
+    ...resolved,
+    ...(typeof ov.path === "string" && ov.path ? { path: ov.path } : {}),
+  };
   const base = (config.path ?? "/trio/mcp").replace(/\/+$/, "");
   const disposers: (() => void)[] = [];
   disposers.push(
@@ -70,6 +78,10 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         const path = urlPath(req);
         const method = req.method ?? "GET";
+        if (path === `${base}/settings`) {
+          await handleModuleSettings(ctx, req, res, "mcp", MCP_SETTING_FIELDS);
+          return;
+        }
         const isTokenPath = isOAuthEnabled(config) && path === `${base}/oauth/token`;
         if (path !== base && path !== `${base}/` && !isTokenPath) {
           sendText(res, 404, "not found");

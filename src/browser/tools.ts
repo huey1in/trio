@@ -8,7 +8,7 @@ import {
   profileConfig, getProfileState, downloadsOf, launchProfile, newPage,
   getPage, activePage, tabList, closeBrowser, pageIdentity, stateOf,
   currentProfile, savedForms, lastFormFields, profileStates, setLastFormFields, setCurrentProfile,
-  noteScreenshotDir, cleanupScreenshots,
+  noteScreenshotDir, cleanupScreenshots, browserOverrides,
 } from "./session.js";
 import { workspaceCwd } from "../lib/tools.js";
 export async function openTool(config: BrowserConfig, args: Record<string, any>) {
@@ -113,7 +113,12 @@ export async function evalTool(config: BrowserConfig, args: Record<string, any>)
 export async function screenshotTool(config: BrowserConfig, args: Record<string, any>, exec: ToolRunContext) {
   const page = await getPage(config);
   const cwd = workspaceCwd(exec);
-  const screenshotDir = config.screenshotDir ?? ".dsh-trio/screenshots";
+  // 面板运行时覆盖:screenshotDir / 清理参数即时生效。
+  const ov = browserOverrides();
+  const screenshotDir =
+    typeof ov.screenshotDir === "string" && ov.screenshotDir
+      ? ov.screenshotDir
+      : (config.screenshotDir ?? ".dsh-trio/screenshots");
   const dir = isAbsolute(screenshotDir) ? screenshotDir : resolve(cwd, screenshotDir);
   mkdirSync(dir, { recursive: true });
   const safeName = String(args.name ?? `shot-${Date.now()}`).replace(
@@ -127,8 +132,8 @@ export async function screenshotTool(config: BrowserConfig, args: Record<string,
   // 懒清理:按保留天数/数量修剪目录,并把目录记下供定时清扫复用。
   noteScreenshotDir(dir);
   cleanupScreenshots(dir, {
-    maxAgeDays: config.screenshotMaxAgeDays,
-    maxCount: config.screenshotMaxCount,
+    maxAgeDays: typeof ov.screenshotMaxAgeDays === "number" ? ov.screenshotMaxAgeDays : config.screenshotMaxAgeDays,
+    maxCount: typeof ov.screenshotMaxCount === "number" ? ov.screenshotMaxCount : config.screenshotMaxCount,
   });
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
   return {

@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext, WebRoute } from "./lib/types.js";
 import { sendText } from "./lib/http.js";
 import { resolveConfig, type ConfigSchema } from "./lib/config.js";
+import { registerModuleSettingsRoute, sectionOverrides, type FieldSpec } from "./lib/settings.js";
 
 export const name = "trio-console";
 export const inject = ["webServer"];
@@ -25,6 +26,11 @@ const DEFAULT_CONFIG = {
   path: "/trio",
 };
 
+/** 面板模块自身的设置字段(⦿ 重启生效)。 */
+const CONSOLE_SETTING_FIELDS: FieldSpec[] = [
+  { key: "path", label: "面板基路径", type: "string", restart: true, defaultValue: "/trio" },
+];
+
 function embedJs(base: string): string {
   return `(function () {
   "use strict";
@@ -34,7 +40,7 @@ function embedJs(base: string): string {
   // —— 挂载(等 body 就绪) ——
   var root = null, btn = null, panel = null, open = false, shot = null, eventsBox = null;
   var modal = null, mTitle = null, mShot = null, mHistory = null, mEmpty = null, modalOpen = false;
-  var settingsBox = null, settingsOpen = false, setRows = {};
+  var settingsBox = null, settingsOpen = false, setSections = {};
   function css() {
     var s = document.createElement("style");
     s.textContent = [
@@ -92,6 +98,11 @@ function embedJs(base: string): string {
       ".trio-setbtn{flex:1;height:26px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}",
       ".trio-setbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       ".trio-setbtn:disabled{opacity:.5;cursor:default}",
+      ".trio-setsec{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l2)}",
+      ".trio-setbody{display:flex;flex-direction:column;gap:6px}",
+      ".trio-setcheck{width:14px;height:14px;accent-color:var(--dsw-alias-state-success-primary)}",
+      ".trio-setbtn-save{height:24px;flex:none;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}",
+      ".trio-setbtn-save:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
     ].join("\\n");
     document.head.appendChild(s);
   }
@@ -128,69 +139,168 @@ function embedJs(base: string): string {
       eventsBox.appendChild(line);
     }
   }
-  // —— 设置区:GitHub / GitLab token 配置(写 DSH credentials 库,不回显) ——
-  function setEnabled(row, on) {
-    row.input.disabled = !on;
-    row.save.disabled = !on;
-    row.clear.disabled = !on;
+  // —— 设置区:各模块配置(凭据写入凭据库/插件存储,普通字段写 settings.json) ——
+  var SET_SECTIONS = [
+    { key: "browser", url: B + "/settings", title: "浏览器" },
+    { key: "mcp", url: M + "/settings", title: "MCP" },
+    { key: "github", url: G + "/settings", title: "GitHub" },
+    { key: "gitlab", url: G2 + "/settings", title: "GitLab" },
+    { key: "console", url: base + "/settings", title: "面板" },
+  ];
+  function srcName(source) {
+    return source === "env" ? "环境变量" : source === "store" ? "面板存储" : "凭据库";
   }
-  function fetchTokenStatus(key, row) {
-    var url = (key === "github" ? G : G2) + "/settings";
-    probe(url).then(function (r) {
-      if (!r.ok) { row.status.textContent = "模块未启用"; setEnabled(row, false); return; }
-      var s = JSON.parse(r.body);
-      var src = s.source === "env" ? "环境变量" : s.source === "store" ? "面板存储" : "凭据库";
-      var text = s.configured ? "已配置(" + src + ")" : "未配置";
-      row.status.textContent = text;
-      setEnabled(row, s.writable !== false);
-    }).catch(function () { row.status.textContent = "连接失败"; setEnabled(row, false); });
+  function buildFieldRow(field) {
+    var row = el("div", "trio-setrow");
+    var head = el("div", "trio-sethead");
+    var labelText = field.label + (field.restart ? " ⟳重启生效" : "");
+    var input = null;
+    if (field.type === "boolean") {
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "trio-setcheck";
+      input.checked = field.value === true;
+      head.appendChild(input);
+      head.appendChild(el("span", "trio-setlabel", labelText));
+    } else {
+      head.appendChild(el("span", "trio-setlabel", labelText));
+      var status = el("span", "trio-setstatus", "");
+      head.appendChild(status);
+    }
+    row.appendChild(head);
+    if (field.type === "boolean") return { row: row, input: input, field: field, status: null };
+    if (field.type === "enum") {
+      input = document.createElement("select");
+      input.className = "trio-setinput";
+      for (var i = 0; i < (field.options || []).length; i++) {
+        var opt = document.createElement("option");
+        opt.value = field.options[i];
+        opt.textContent = field.options[i] === "" ? "(默认)" : field.options[i];
+        input.appendChild(opt);
+      }
+      input.value = field.value === undefined || field.value === null ? "" : String(field.value);
+    } else {
+      input = document.createElement("input");
+      input.className = "trio-setinput";
+      input.type = field.type === "number" ? "number" : field.type === "password" ? "password" : "text";
+      if (field.type === "password") {
+        input.placeholder = field.configured ? "已设置(不回显)" : "未设置";
+        input.autocomplete = "new-password";
+        input.spellcheck = false;
+        if (head.lastChild) head.lastChild.textContent = field.configured ? "已设置 ✓" : "未设置";
+      } else {
+        input.value = field.value === undefined || field.value === null ? "" : String(field.value);
+        input.placeholder = "空=恢复默认";
+      }
+    }
+    row.appendChild(input);
+    return { row: row, input: input, field: field, status: head.children[head.children.length - 1] };
+  }
+  function renderSection(def, sec) {
+    sec.body.innerHTML = "";
+    sec.entries = [];
+    sec.tokenInput = null;
+    var d = def.data;
+    if (!d) { sec.status.textContent = def.error || "模块未启用"; return; }
+    sec.status.textContent = "";
+    if (d.token) {
+      var t = d.token;
+      var trow = el("div", "trio-setrow");
+      var thead = el("div", "trio-sethead");
+      thead.appendChild(el("span", "trio-setlabel", t.label || "Token"));
+      var tstatus = el("span", "trio-setstatus", t.configured ? "已配置(" + srcName(t.source) + ")" : "未配置");
+      thead.appendChild(tstatus);
+      var tinput = document.createElement("input");
+      tinput.type = "password";
+      tinput.className = "trio-setinput";
+      tinput.autocomplete = "new-password";
+      tinput.spellcheck = false;
+      tinput.placeholder = t.configured ? "已设置(不回显)" : "粘贴 token";
+      tinput.disabled = t.writable === false;
+      trow.appendChild(thead);
+      trow.appendChild(tinput);
+      sec.body.appendChild(trow);
+      sec.tokenInput = tinput;
+    }
+    for (var i = 0; i < (d.fields || []).length; i++) {
+      var entry = buildFieldRow(d.fields[i]);
+      sec.entries.push(entry);
+      sec.body.appendChild(entry.row);
+    }
   }
   function refreshSettings() {
-    for (var key in setRows) fetchTokenStatus(key, setRows[key]);
+    for (var i = 0; i < SET_SECTIONS.length; i++) {
+      (function (def, sec) {
+        probe(def.url).then(function (r) {
+          if (!r.ok) { def.data = null; def.error = "模块未启用"; }
+          else {
+            try { def.data = JSON.parse(r.body); def.error = ""; } catch (e) { def.data = null; def.error = "响应异常"; }
+          }
+          renderSection(def, sec);
+        }).catch(function () { def.data = null; def.error = "连接失败"; renderSection(def, sec); });
+      })(SET_SECTIONS[i], setSections[SET_SECTIONS[i].key]);
+    }
   }
-  function saveToken(key, row, value) {
-    var url = (key === "github" ? G : G2) + "/settings";
-    probe(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: value }) }).then(function (r) {
+  function saveSection(def, sec) {
+    var payload = {};
+    if (sec.tokenInput !== null && sec.tokenInput.value) payload.token = sec.tokenInput.value;
+    var fields = {};
+    for (var i = 0; i < sec.entries.length; i++) {
+      var entry = sec.entries[i];
+      var f = entry.field;
+      if (f.type === "password") {
+        if (entry.input.value) fields[f.key] = entry.input.value;
+        continue;
+      }
+      if (f.type === "boolean") { fields[f.key] = entry.input.checked; continue; }
+      var raw = entry.input.value;
+      if (f.type === "number") {
+        if (raw.trim() === "") { fields[f.key] = ""; continue; }
+        var num = Number(raw);
+        if (!isFinite(num)) { sec.status.textContent = "无效数字: " + f.label; return; }
+        fields[f.key] = num;
+      } else {
+        fields[f.key] = raw;
+      }
+    }
+    if (!payload.token && Object.keys(fields).length === 0) { sec.status.textContent = "没有改动"; return; }
+    if (Object.keys(fields).length > 0) payload.fields = fields;
+    sec.status.textContent = "保存中…";
+    probe(def.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).then(function (r) {
       if (r.ok) {
-        row.status.textContent = value === "" ? "已清除 ✓" : "已保存 ✓";
-        row.input.value = "";
-        setTimeout(refreshSettings, 600);
+        sec.status.textContent = "已保存 ✓";
+        try {
+          def.data = JSON.parse(r.body);
+          def.error = "";
+          renderSection(def, sec);
+        } catch (e) {}
+        setTimeout(function () { sec.status.textContent = ""; }, 1500);
       } else {
         var msg = "HTTP " + r.status;
         try { var e = JSON.parse(r.body); if (e && e.error) msg = e.error; } catch (ignore) {}
-        row.status.textContent = "保存失败: " + msg;
+        sec.status.textContent = "保存失败: " + msg;
       }
-    }).catch(function () { row.status.textContent = "连接失败"; });
-  }
-  function buildSettingsRow(key, labelText) {
-    var row = el("div", "trio-setrow");
-    var head = el("div", "trio-sethead");
-    head.appendChild(el("span", "trio-setlabel", labelText));
-    var status = el("span", "trio-setstatus", "…");
-    head.appendChild(status);
-    var input = document.createElement("input");
-    input.type = "password";
-    input.className = "trio-setinput";
-    input.placeholder = "粘贴 token(仅存 DSH 凭据库,不回显)";
-    input.autocomplete = "new-password";
-    input.spellcheck = false;
-    var btns = el("div", "trio-setbtns");
-    var save = el("button", "trio-setbtn", "保存");
-    var clear = el("button", "trio-setbtn", "清除");
-    save.addEventListener("click", function () { saveToken(key, setRows[key], input.value); });
-    clear.addEventListener("click", function () { saveToken(key, setRows[key], ""); });
-    btns.appendChild(save); btns.appendChild(clear);
-    row.appendChild(head); row.appendChild(input); row.appendChild(btns);
-    var entry = { status: status, input: input, save: save, clear: clear };
-    setRows[key] = entry;
-    setEnabled(entry, false);
-    return row;
+    }).catch(function () { sec.status.textContent = "连接失败"; });
   }
   function buildSettings() {
     settingsBox = el("div", "trio-settings");
-    settingsBox.appendChild(el("div", "trio-settings-title", "凭据设置 · 存入 DSH 凭据库(未挂载时存 .dsh-trio/tokens.json),保存即时生效"));
-    settingsBox.appendChild(buildSettingsRow("github", "GitHub Token (GITHUB_TOKEN)"));
-    settingsBox.appendChild(buildSettingsRow("gitlab", "GitLab Token (GITLAB_TOKEN)"));
+    settingsBox.appendChild(el("div", "trio-settings-title", "模块配置 · 保存即时生效(标 ⟳ 的路径类改动需重启 DSH);凭据/密钥不回显"));
+    for (var i = 0; i < SET_SECTIONS.length; i++) {
+      var def = SET_SECTIONS[i];
+      var box = el("div", "trio-setsec");
+      var head = el("div", "trio-sethead");
+      head.appendChild(el("span", "trio-setlabel", def.title));
+      var status = el("span", "trio-setstatus", "…");
+      head.appendChild(status);
+      var save = el("button", "trio-setbtn-save", "保存");
+      var body = el("div", "trio-setbody");
+      box.appendChild(head);
+      box.appendChild(body);
+      settingsBox.appendChild(box);
+      var sec = { box: box, body: body, status: status, entries: [], tokenInput: null };
+      setSections[def.key] = sec;
+      save.addEventListener("click", function (d, s) { return function () { saveSection(d, s); }; }(def, sec));
+    }
   }
   // —— 大屏模态框:点面板缩略图打开,2 秒轮询实时画面 + 访问历史 ——
   function renderHistory(list) {
@@ -376,11 +486,16 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   if (typeof config.enabled === "boolean" && !config.enabled) return;
   const webServer = ctx.get<{ register(route: WebRoute): () => void; tapIndex(transform: (html: string) => string): () => void; port?: number }>("webServer");
   if (webServer === undefined) return;
-  const base = config.path.replace(/\/+$/, "");
+  // 面板设置覆盖:启动时合并 restart 字段(path)。
+  const ov = sectionOverrides("console", CONSOLE_SETTING_FIELDS);
+  const base = (typeof ov.path === "string" && ov.path ? ov.path : config.path).replace(/\/+$/, "");
   const disposeEmbed = registerEmbed(webServer, base);
+  // 面板模块自身的设置端点(面板基路径等)。
+  const disposeSettings = registerModuleSettingsRoute(ctx, base, "console", CONSOLE_SETTING_FIELDS);
   ctx.effect(() => () => {
     try {
       disposeEmbed();
+      disposeSettings();
     } catch {
       /* ignore */
     }

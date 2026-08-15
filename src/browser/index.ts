@@ -14,7 +14,7 @@ import type { BrowserConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./register.js";
 import { registerBrowserApi } from "./ui.js";
-import { closeBrowser, sweepScreenshotDir } from "./session.js";
+import { closeBrowser, sweepScreenshotDir, browserOverrides } from "./session.js";
 
 export type { BrowserConfig } from "./types.js";
 export { profileConfig } from "./session.js";
@@ -64,10 +64,13 @@ const DEFAULT_CONFIG = {
  */
 
 export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
-  const config = resolveConfig("browser", BROWSER_SCHEMA, DEFAULT_CONFIG, rawConfig) as BrowserConfig;
-  if (typeof config.enabled === "boolean" && !config.enabled) return;
+  const resolved = resolveConfig("browser", BROWSER_SCHEMA, DEFAULT_CONFIG, rawConfig) as BrowserConfig;
+  if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
   const tools = ctx.get("tools");
   if (tools === undefined) return;
+  // 面板设置覆盖:启动时合并一次(restart 字段如 liveViewPath 生效;
+  // headless/channel/screenshotDir 等 live 字段在使用时点会再读)。
+  const config = { ...resolved, ...browserOverrides() } as BrowserConfig;
   registerTools(ctx, config);
   const systemPrompt = ctx.get<{
     section(section: { name: string; order?: number; text: string }): () => void;

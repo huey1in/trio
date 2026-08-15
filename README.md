@@ -289,11 +289,17 @@ DELETE 会话 / **服务器主动进度与流式输出通知**。
 - **浏览器行**:开关状态、标签数、当前 URL,面板展开时显示实时画面缩略图,点击弹出大屏模态框(实时画面 + 访问历史)
 - **MCP 行**:在线状态,面板头部直接给出 MCP 端点 URL 便于配置客户端
 - **GitHub 行**:webhook 在线状态 + **最近事件看板**(最近 3 条 + 总数)
-- **⚙ 设置区**:GitHub / GitLab token 直接在面板里配置——优先写入 DSH 凭据库
-  (`$DSH_HOME/.credentials.yaml`,0600),部署未挂载凭据服务时回退到插件自有存储
-  (`$DSH_HOME/.dsh-trio/tokens.json`,0600),保存**即时生效无需重启**;状态只显示
-  "已配置(凭据库/面板存储/环境变量)/未配置",凭据值永不回传页面。若环境变量
-  已提供 token,输入框自动禁用(环境变量优先级更高)。
+- **⚙ 设置区**:五个模块(浏览器 / MCP / GitHub / GitLab / 面板)的配置都可在
+  面板里改,保存即时生效:
+  - **凭据**:GitHub/GitLab token、webhook 密钥、MCP 访问 token——优先写入 DSH
+    凭据库(`$DSH_HOME/.credentials.yaml`,0600),部署未挂载凭据服务时回退到
+    插件自有存储(`$DSH_HOME/.dsh-trio/tokens.json`,0600);凭据值永不回传页面,
+    环境变量已提供时输入框自动禁用;
+  - **普通配置**:headless、浏览器通道、截图目录/保留策略、操作超时、评审模型、
+    自动评审事件等——写入 `$DSH_HOME/.dsh-trio/settings.json`(0600),使用
+    时点读取即时生效;空值 = 恢复默认;
+  - **路径类**(标 ⟳):liveViewPath、webhookPath、MCP path、面板基路径——
+    路由注册时生效,改动后需重启 DSH。
 
 面板每 5 秒自动刷新。不想注入?给 `trio-console` 行加 `config: { enabled: false }`。
 

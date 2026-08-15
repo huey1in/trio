@@ -16,7 +16,8 @@ import { registerTools } from "./tools.js";
 import { handleWebhook, extractMrRef, verifyToken } from "./webhook.js";
 import { encodeProject, projectMr, projectIssue } from "./api.js";
 import { sendText, sendJson, urlPath } from "../lib/http.js";
-import { registerCredentialSettings } from "../lib/credentials.js";
+import { registerModuleSettingsRoute, sectionOverrides } from "../lib/settings.js";
+import { GITLAB_SETTING_FIELDS } from "./settings.js";
 
 export type { GitlabConfig } from "./types.js";
 export { extractMrRef, verifyToken } from "./webhook.js";
@@ -69,10 +70,12 @@ function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
       });
     },
   });
-  // 凭据设置端点:面板里配置 GITLAB_TOKEN(写入 DSH credentials 库)。
-  const disposeSettings = registerCredentialSettings(
+  // 设置端点:面板 ⚙ 配置 GITLAB_TOKEN 与模块参数(写入凭据库/设置存储)。
+  const disposeSettings = registerModuleSettingsRoute(
     ctx,
     base.replace(/\/webhook$/, ""),
+    "gitlab",
+    GITLAB_SETTING_FIELDS,
     config.tokenEnv ?? "GITLAB_TOKEN",
     "GitLab",
   );
@@ -87,10 +90,14 @@ function registerWebhook(ctx: TrioContext, config: GitlabConfig): void {
 }
 
 export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
-  const config = resolveConfig("gitlab", GITLAB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GitlabConfig;
+  const resolved = resolveConfig("gitlab", GITLAB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GitlabConfig;
   const tools = ctx.get("tools");
   if (tools === undefined) return;
-  if (typeof config.enabled === "boolean" && !config.enabled) return;
+  if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
+  // 面板设置覆盖:启动时合并 restart 字段(webhookPath)。
+  const ov = sectionOverrides("gitlab", GITLAB_SETTING_FIELDS);
+  const config: GitlabConfig = { ...resolved };
+  if (typeof ov.webhookPath === "string" && ov.webhookPath) config.webhookPath = ov.webhookPath;
   registerTools(ctx, config);
   registerWebhook(ctx, config);
   const systemPrompt = ctx.get("systemPrompt");

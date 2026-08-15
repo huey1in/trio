@@ -15,7 +15,8 @@ import { handleWebhook, verifySignature, extractPrRef, recentEvents } from "./we
 import { extractIssueRef } from "./autofix.js";
 import { buildReviewPrompt } from "./review.js";
 import { projectIssue, projectPr } from "./api.js";
-import { registerCredentialSettings } from "../lib/credentials.js";
+import { registerModuleSettingsRoute, sectionOverrides } from "../lib/settings.js";
+import { GITHUB_SETTING_FIELDS } from "./settings.js";
 
 export type { GithubConfig } from "./types.js";
 export { verifySignature, extractPrRef } from "./webhook.js";
@@ -93,10 +94,12 @@ function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
       sendJson(res, 200, { events: recentEvents });
     },
   });
-  // 凭据设置端点:面板里配置 GITHUB_TOKEN(写入 DSH credentials 库)。
-  const disposeSettings = registerCredentialSettings(
+  // 设置端点:面板 ⚙ 配置 GITHUB_TOKEN 与模块参数(写入凭据库/设置存储)。
+  const disposeSettings = registerModuleSettingsRoute(
     ctx,
     base.replace(/\/webhook$/, ""),
+    "github",
+    GITHUB_SETTING_FIELDS,
     config.tokenEnv ?? "GITHUB_TOKEN",
     "GitHub",
   );
@@ -112,8 +115,12 @@ function registerWebhook(ctx: TrioContext, config: GithubConfig): void {
 }
 
 export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
-  const config = resolveConfig("github", GITHUB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GithubConfig;
-  if (typeof config.enabled === "boolean" && !config.enabled) return;
+  const resolved = resolveConfig("github", GITHUB_SCHEMA, DEFAULT_CONFIG, rawConfig) as GithubConfig;
+  if (typeof resolved.enabled === "boolean" && !resolved.enabled) return;
+  // 面板设置覆盖:启动时合并 restart 字段(webhookPath)。
+  const ov = sectionOverrides("github", GITHUB_SETTING_FIELDS);
+  const config: GithubConfig = { ...resolved };
+  if (typeof ov.webhookPath === "string" && ov.webhookPath) config.webhookPath = ov.webhookPath;
   registerTools(ctx, config);
   registerWebhook(ctx, config);
   const systemPrompt = ctx.get<{

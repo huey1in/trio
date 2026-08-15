@@ -4,6 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext } from "../lib/types.js";
 import type { GithubConfig, GithubEventEntry } from "./types.js";
 import { readRawBody, sendJson } from "../lib/http.js";
+import { sectionOverrides } from "../lib/settings.js";
+import { GITHUB_SETTING_FIELDS } from "./settings.js";
 import { reviewPullRequest } from "./review.js";
 import { extractIssueRef } from "./autofix.js";
 import { runAutoFix } from "./autofix.js";
@@ -74,7 +76,11 @@ export function extractPrRef(payload: Record<string, any>): Record<string, any> 
 
 
 export async function handleWebhook(ctx: TrioContext, config: GithubConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
+  // 面板设置覆盖:webhookSecret(优先于环境变量),每次请求读取即时生效。
+  const ov = sectionOverrides("github", GITHUB_SETTING_FIELDS);
+  const panelSecret = typeof ov.webhookSecret === "string" && ov.webhookSecret ? ov.webhookSecret : "";
+  const envSecret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
+  const secret = panelSecret || envSecret;
   const rawBody = await readRawBody(req);
   if (secret) {
     const signature = req.headers["x-hub-signature-256"];
@@ -117,7 +123,12 @@ export async function handleWebhook(ctx: TrioContext, config: GithubConfig, req:
   }
 
   const actionStr = String(action);
-  if (event !== "pull_request" || !(config.autoReviewEvents ?? []).includes(actionStr)) {
+  // 面板覆盖:autoReviewEvents(逗号分隔,空 = 关闭);未覆盖时用 config。
+  const reviewEvents =
+    "autoReviewEvents" in ov
+      ? String(ov.autoReviewEvents ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+      : (config.autoReviewEvents ?? []);
+  if (event !== "pull_request" || !reviewEvents.includes(actionStr)) {
     recordEvent(event, actionStr, payload, false, "not handled");
     sendJson(res, 200, { received: true, event, action: actionStr, handled: false });
     return;

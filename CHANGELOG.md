@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **面板设置区扩展(五模块配置)**:除 GitHub/GitLab token 外,⚙ 设置区现在
+  覆盖全部五个模块:
+  - **浏览器**:headless 开关、浏览器通道、截图目录、截图保留天数/数量、
+    操作超时(即时生效)+ liveViewPath(重启生效);
+  - **GitHub / GitLab**:webhook 密钥(密码型,不回显)、评审模型
+    provider/model、自动评审事件(逗号分隔)+ webhookPath(重启生效);
+  - **MCP**:访问 token(Bearer,密码型)+ 端点路径(重启生效);
+  - **面板**:基路径(重启生效)。
+  普通配置写入 `$DSH_HOME/.dsh-trio/settings.json`(0600,按字段白名单
+  校验,空值恢复默认);密钥类沿用凭据库/自有存储,永不回传。各模块在
+  使用时点读取覆盖值(webhook 签名/评审模型/鉴权/截图清理等),重启类
+  字段在启动时合并。附带设置存储单元测试。
+
 ### 修复
 
 - **面板 token 输入框禁用**:部署未挂载 DSH credentials 服务时

@@ -3,6 +3,8 @@ import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
 import type { BrowserConfig, ProfileState, DownloadEntry, FormField, NavEntry } from "./types.js";
+import { sectionOverrides } from "../lib/settings.js";
+import { BROWSER_SETTING_FIELDS } from "./settings.js";
 
 /** 当前活动 profile 名(默认 "default")。 */
 export let currentProfile = "default";
@@ -69,8 +71,15 @@ function recordNav(profile: string, url: string): NavEntry {
   return entry;
 }
 
+/** 面板 ⚙ 设置区对浏览器模块的运行时覆盖(已按白名单校验)。 */
+export function browserOverrides(): Record<string, unknown> {
+  return sectionOverrides("browser", BROWSER_SETTING_FIELDS);
+}
+
 export function attachPage(page: Page, config: BrowserConfig): void {
-  page.setDefaultTimeout(config.timeoutMs ?? 30000);
+  const ov = browserOverrides();
+  const timeoutMs = typeof ov.timeoutMs === "number" ? ov.timeoutMs : (config.timeoutMs ?? 30000);
+  page.setDefaultTimeout(timeoutMs);
   page.on("download", (download) => {
     const list = downloadsOf(currentProfile);
     list.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
@@ -116,7 +125,13 @@ interface LaunchCandidate {
 export async function launchProfile(name: string, config: BrowserConfig): Promise<void> {
   const pw = await loadPlaywright();
   const state = getProfileState(name);
-  const resolved = profileConfig(config, name);
+  // 面板运行时覆盖:headless/channel 在下次浏览器启动时生效。
+  const ov = browserOverrides();
+  const resolved = {
+    ...profileConfig(config, name),
+    ...("headless" in ov ? { headless: ov.headless as boolean } : {}),
+    ...("channel" in ov ? { channel: ov.channel as string } : {}),
+  };
   const base: LaunchCandidate = { headless: resolved.headless ?? true };
   const candidates: LaunchCandidate[] = [];
   if (resolved.executablePath) {

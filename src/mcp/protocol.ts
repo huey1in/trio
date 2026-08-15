@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrioContext } from "../lib/types.js";
 import type { McpConfig, ProgressFn, DeltaFn } from "./types.js";
 import { readJsonBody, sendJson, sendText, openSse, urlPath, type SseWriter } from "../lib/http.js";
+import { sectionOverrides } from "../lib/settings.js";
+import { MCP_SETTING_FIELDS } from "./settings.js";
 import { MCP_TOOLS } from "./tools.js";
 import { resourcesList, resourcesRead } from "./sessions.js";
 import { callMcpTool } from "./dispatch.js";
@@ -74,6 +76,10 @@ export function methodNotFound(id: any) {
 
 export function checkAuth(req: IncomingMessage, config: McpConfig): boolean {
   const header = req.headers.authorization ?? "";
+  // 面板设置里的静态 token(每次请求读取,即时生效)
+  const ov = sectionOverrides("mcp", MCP_SETTING_FIELDS);
+  const panelToken = typeof ov.authToken === "string" && ov.authToken ? ov.authToken : "";
+  if (panelToken && header === `Bearer ${panelToken}`) return true;
   // 静态 token(如果配置了)
   if (config.authTokenEnv) {
     const token = process.env[config.authTokenEnv];
@@ -85,7 +91,7 @@ export function checkAuth(req: IncomingMessage, config: McpConfig): boolean {
     if (checkOAuthToken(bearer)) return true;
   }
   // 未配置任何鉴权时不拦截
-  const hasAuth = config.authTokenEnv || isOAuthEnabled(config);
+  const hasAuth = panelToken || config.authTokenEnv || isOAuthEnabled(config);
   return !hasAuth;
 }
 

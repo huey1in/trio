@@ -3,6 +3,8 @@ import type { TrioContext } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
 import { runLlm } from "../lib/llm.js";
 import { ghFetch } from "./api.js";
+import { sectionOverrides } from "../lib/settings.js";
+import { GITHUB_SETTING_FIELDS } from "./settings.js";
 const reviewedPrs = new Map();
 
 const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这个 Pull Request 的变更,输出简洁的中文评审意见,格式:
@@ -20,7 +22,12 @@ const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这�
 
 
 async function runReviewLlm(ctx: TrioContext, config: GithubConfig, prompt: string, signal: AbortSignal): Promise<string> {
-  return runLlm(ctx, config.reviewModel, REVIEW_SYSTEM_PROMPT, prompt, signal, { maxTokens: 2000 });
+  // 面板设置覆盖:reviewModelProvider/reviewModelModel(空则用 config 或默认模型)。
+  const ov = sectionOverrides("github", GITHUB_SETTING_FIELDS);
+  const model: Record<string, any> = { ...(config.reviewModel ?? {}) };
+  if (typeof ov.reviewModelProvider === "string" && ov.reviewModelProvider) model.provider = ov.reviewModelProvider;
+  if (typeof ov.reviewModelModel === "string" && ov.reviewModelModel) model.model = ov.reviewModelModel;
+  return runLlm(ctx, model, REVIEW_SYSTEM_PROMPT, prompt, signal, { maxTokens: 2000 });
 }
 
 export function buildReviewPrompt(pr: Record<string, any>, files: Record<string, any>[]): string {

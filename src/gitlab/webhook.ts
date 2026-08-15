@@ -5,6 +5,8 @@ import type { TrioContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
 import { runLlm } from "../lib/llm.js";
 import { readRawBody, sendJson } from "../lib/http.js";
+import { sectionOverrides } from "../lib/settings.js";
+import { GITLAB_SETTING_FIELDS } from "./settings.js";
 import { glFetch, encodeProject } from "./api.js";
 const REVIEW_SYSTEM_PROMPT = `你是资深代码评审员。请审阅下面这个 GitLab Merge Request 的变更,输出简洁的中文评审意见,格式:
 ## 总结
@@ -51,7 +53,11 @@ export function buildMrReviewPrompt(mr: Record<string, any>, changes: Record<str
 }
 
 export async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
+  // 面板设置覆盖:webhookSecret(优先于环境变量),每次请求读取即时生效。
+  const ov = sectionOverrides("gitlab", GITLAB_SETTING_FIELDS);
+  const panelSecret = typeof ov.webhookSecret === "string" && ov.webhookSecret ? ov.webhookSecret : "";
+  const envSecret = config.webhookSecretEnv ? process.env[config.webhookSecretEnv] : undefined;
+  const secret = panelSecret || envSecret;
   const rawBody = await readRawBody(req);
   if (secret) {
     const token = req.headers["x-gitlab-token"];
@@ -68,11 +74,16 @@ export async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req:
     return;
   }
   const mr = extractMrRef(payload);
+  // 面板覆盖:autoReviewEvents(逗号分隔,空 = 关闭);未覆盖时用 config。
+  const reviewEvents =
+    "autoReviewEvents" in ov
+      ? String(ov.autoReviewEvents ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+      : (config.autoReviewEvents ?? []);
   if (
     payload?.object_kind !== "merge_request" ||
     mr === undefined ||
     mr.state !== "opened" ||
-    !(config.autoReviewEvents ?? []).includes(mr.action)
+    !reviewEvents.includes(mr.action)
   ) {
     sendJson(res, 200, { received: true, handled: false, reason: "not a reviewable MR event" });
     return;
@@ -83,12 +94,16 @@ export async function handleWebhook(ctx: TrioContext, config: GitlabConfig, req:
       const detail = await glFetch(ctx, config, `/projects/${project}/merge_requests/${mr.iid}`);
       const changes = await glFetch(ctx, config, `/projects/${project}/merge_requests/${mr.iid}/changes`);
       const prompt = buildMrReviewPrompt(mr, changes?.changes ?? []);
+      // 面板设置覆盖:reviewModelProvider/reviewModelModel。
+      const model: Record<string, any> = { ...(config.reviewModel ?? {}) };
+      if (typeof ov.reviewModelProvider === "string" && ov.reviewModelProvider) model.provider = ov.reviewModelProvider;
+      if (typeof ov.reviewModelModel === "string" && ov.reviewModelModel) model.model = ov.reviewModelModel;
       const aborted = new AbortController();
       const timer = setTimeout(() => aborted.abort(), 60000);
       try {
         const review = await runLlm(
           ctx,
-          config.reviewModel,
+          model,
           REVIEW_SYSTEM_PROMPT,
           prompt.slice(0, config.reviewMaxDiffChars),
           aborted.signal,
