@@ -85,8 +85,10 @@ function embedJs(base: string): string {
       ".trio-history .u{overflow:hidden;text-overflow:ellipsis}",
       ".trio-gear{width:28px;height:28px;flex:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:1}",
       ".trio-gear:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
-      // 设置区:max-height 过渡实现向下延伸动画(display 保持 flex,不破坏面板滚动)。
-      ".trio-settings{display:flex;flex-direction:column;gap:8px;max-height:0;opacity:0;overflow:hidden;transition:max-height .28s ease,opacity .22s ease}",
+      // 设置区:max-height 过渡实现向下延伸动画。flex-shrink:0 必须——
+      // 否则 overflow:hidden 使该项 min-height 归零,flex 会把它压扁裁掉,
+      // 面板内容"看起来刚好放得下"就永远不出现滚动条。
+      ".trio-settings{display:flex;flex-direction:column;gap:8px;max-height:0;opacity:0;overflow:hidden;flex-shrink:0;transition:max-height .28s ease,opacity .22s ease}",
       ".trio-settings.on{max-height:2400px;opacity:1}",
       ".trio-settings-title{margin-top:8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5}",
       ".trio-setrow{display:flex;flex-direction:column;gap:4px}",
