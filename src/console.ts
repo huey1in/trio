@@ -196,13 +196,12 @@ function embedJs(base: string): string {
         input.autocomplete = "new-password";
         input.spellcheck = false;
         if (head.lastChild) head.lastChild.textContent = field.configured ? "已设置 ✓" : "未设置";
-        initial = "";
       } else {
         input.value = field.value === undefined || field.value === null ? "" : String(field.value);
         input.placeholder = "空=恢复默认";
       }
-      initial = input.value;
     }
+    initial = input.value; // 非 boolean 类型统一记录初始值(含 enum/password/number)
     row.appendChild(input);
     return { row: row, input: input, field: field, status: head.children[head.children.length - 1], initial: initial };
   }
