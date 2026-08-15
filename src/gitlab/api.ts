@@ -1,6 +1,7 @@
 // dsh-trio · GitLab — REST API 层
 import type { TrioContext } from "../lib/types.js";
 import type { GitlabConfig } from "./types.js";
+import { readStoredToken } from "../lib/credentials.js";
 
 export function encodeProject(project: string): string {
   return encodeURIComponent(String(project));
@@ -15,7 +16,10 @@ export async function resolveToken(ctx: TrioContext, config: GitlabConfig): Prom
   } catch {
     /* fall through to env */
   }
-  return config.tokenEnv ? (process.env[config.tokenEnv] ?? undefined) : undefined;
+  const envValue = config.tokenEnv ? process.env[config.tokenEnv] : undefined;
+  if (envValue) return envValue;
+  // 面板设置写入的插件自有存储(credentials 服务缺失时的回退)
+  return await readStoredToken(config.tokenEnv ?? "GITLAB_TOKEN");
 }
 
 export async function glFetch(ctx: TrioContext, config: GitlabConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {

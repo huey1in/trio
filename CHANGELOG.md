@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **面板 token 输入框禁用**:部署未挂载 DSH credentials 服务时
+  (`ctx.get("credentials")` 为 undefined),设置端点错误地把 `writable` 置
+  false 导致输入框无法输入。现在凭据服务缺失时回退到插件自有存储
+  `$DSH_HOME/.dsh-trio/tokens.json`(0600),工具的 `resolveToken` 也按
+  凭据服务 → 环境变量 → 自有存储的顺序解析。
+
 ## [1.4.0] - 2026-08-15
 
 ### 新增

@@ -1,6 +1,7 @@
 // dsh-trio · GitHub — REST API 层(token 解析、请求与重试、字段投影)
 import type { TrioContext } from "../lib/types.js";
 import type { GithubConfig } from "./types.js";
+import { readStoredToken } from "../lib/credentials.js";
 
 /** "owner/repo" → URL 编码的 project id(owner%2Frepo)。 */
 export function encodeProject(project: string): string {
@@ -16,7 +17,10 @@ export async function resolveToken(ctx: TrioContext, config: GithubConfig): Prom
   } catch {
     /* fall through to env */
   }
-  return config.tokenEnv ? (process.env[config.tokenEnv] ?? undefined) : undefined;
+  const envValue = config.tokenEnv ? process.env[config.tokenEnv] : undefined;
+  if (envValue) return envValue;
+  // 面板设置写入的插件自有存储(credentials 服务缺失时的回退)
+  return await readStoredToken(config.tokenEnv ?? "GITHUB_TOKEN");
 }
 
 export async function ghFetch(ctx: TrioContext, config: GithubConfig, pathname: string, options: Record<string, any> = {}, signal?: AbortSignal): Promise<any> {

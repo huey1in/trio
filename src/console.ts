@@ -139,9 +139,8 @@ function embedJs(base: string): string {
     probe(url).then(function (r) {
       if (!r.ok) { row.status.textContent = "模块未启用"; setEnabled(row, false); return; }
       var s = JSON.parse(r.body);
-      var text = s.configured
-        ? "已配置(" + (s.source === "env" ? "环境变量" : "凭据库") + ")"
-        : "未配置";
+      var src = s.source === "env" ? "环境变量" : s.source === "store" ? "面板存储" : "凭据库";
+      var text = s.configured ? "已配置(" + src + ")" : "未配置";
       row.status.textContent = text;
       setEnabled(row, s.writable !== false);
     }).catch(function () { row.status.textContent = "连接失败"; setEnabled(row, false); });
@@ -189,7 +188,7 @@ function embedJs(base: string): string {
   }
   function buildSettings() {
     settingsBox = el("div", "trio-settings");
-    settingsBox.appendChild(el("div", "trio-settings-title", "凭据设置 · 写入 DSH 凭据库(.credentials.yaml),保存即时生效"));
+    settingsBox.appendChild(el("div", "trio-settings-title", "凭据设置 · 存入 DSH 凭据库(未挂载时存 .dsh-trio/tokens.json),保存即时生效"));
     settingsBox.appendChild(buildSettingsRow("github", "GitHub Token (GITHUB_TOKEN)"));
     settingsBox.appendChild(buildSettingsRow("gitlab", "GitLab Token (GITLAB_TOKEN)"));
   }
