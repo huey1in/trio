@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-08-15
+
+### 修复
+
+- **实时画面页连接失败**:`/trio/browser` 页面用相对路径 `./status` 轮询,
+  无尾斜杠访问时解析到 `/trio/status` 收到 404("not found" 纯文本),
+  `r.json()` 报 `Unexpected token 'o'`。改为服务端把 API 基址以绝对路径
+  注入页面(`API + '/status'`),并加 `r.ok` 检查给出明确的 HTTP 状态错误。
+
 ## [1.1.2] - 2026-08-15
 
 ### 修复

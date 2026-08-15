@@ -5,7 +5,7 @@ import type { BrowserConfig } from "./types.js";
 import { activePage } from "./session.js";
 import { statusTool } from "./tools.js";
 import { urlPath, sendText, sendJson } from "../lib/http.js";
-const LIVE_VIEW_HTML = `<!doctype html>
+const LIVE_VIEW_HTML = (api: string) => `<!doctype html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
@@ -40,16 +40,20 @@ const LIVE_VIEW_HTML = `<!doctype html>
   const empty = document.getElementById('empty');
   const status = document.getElementById('status');
   const dot = document.getElementById('dot');
+  // 服务端注入的 API 基址(绝对路径):页面在 /trio/browser 无尾斜杠访问时,
+  // 相对路径 ./status 会解析到 /trio/status 导致 404。
+  const API = ${JSON.stringify(api)};
   async function refresh() {
     try {
-      const r = await fetch('./status', { cache: 'no-store' });
+      const r = await fetch(API + '/status', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const s = await r.json();
       if (s.open) {
         dot.className = 'on';
         status.textContent = (s.url || '(空白页)') + ' — ' + (s.title || '');
         shot.style.display = 'block';
         empty.style.display = 'none';
-        shot.src = './screenshot?v=' + Date.now();
+        shot.src = API + '/screenshot?v=' + Date.now();
       } else {
         dot.className = '';
         status.textContent = '浏览器未打开(' + (s.channel || '未知') + ')';
@@ -79,7 +83,7 @@ export function registerLiveView(ctx: TrioContext, config: BrowserConfig) {
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         const path = urlPath(req);
         if (path === base || path === `${base}/`) {
-          sendText(res, 200, LIVE_VIEW_HTML, { "content-type": "text/html; charset=utf-8" });
+          sendText(res, 200, LIVE_VIEW_HTML(base), { "content-type": "text/html; charset=utf-8" });
           return;
         }
         if (path === `${base}/status`) {
