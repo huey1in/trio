@@ -1,8 +1,9 @@
 // dsh-trio · 浏览器自动化
 //
-// 一个共享的 Playwright 浏览器会话(agent 通过工具控制,人在 /trio/browser
-// 实时画面页旁观)。仅依赖 playwright-core:优先使用系统已装的
-// Edge/Chrome(channel 自动探测),无需下载 Chromium。
+// 一个共享的 Playwright 浏览器会话(agent 通过工具控制,人在原生界面
+// 右下角面板旁观:缩略图点开大屏模态框,含实时画面与访问历史)。
+// 仅依赖 playwright-core:优先使用系统已装的 Edge/Chrome(channel
+// 自动探测),无需下载 Chromium。
 //
 // 工具集:browser_open / browser_snapshot / browser_click / browser_type /
 // browser_press / browser_eval / browser_screenshot / browser_wait /
@@ -12,7 +13,7 @@ import type { TrioContext } from "../lib/types.js";
 import type { BrowserConfig } from "./types.js";
 import { resolveConfig, type ConfigSchema } from "../lib/config.js";
 import { registerTools } from "./register.js";
-import { registerLiveView } from "./ui.js";
+import { registerBrowserApi } from "./ui.js";
 import { closeBrowser } from "./session.js";
 
 export type { BrowserConfig } from "./types.js";
@@ -75,7 +76,7 @@ export function apply(ctx: TrioContext, rawConfig: Record<string, any>) {
   if (sectionDispose !== undefined) {
     ctx.effect(() => sectionDispose);
   }
-  registerLiveView(ctx, config);
+  registerBrowserApi(ctx, config);
   ctx.effect(() => () => {
     void closeBrowser().catch(() => {});
   });

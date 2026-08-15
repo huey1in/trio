@@ -1,6 +1,6 @@
-// dsh-trio · 浏览器 — 会话与标签页管理(多 profile、userDataDir 持久化、下载记录)
+// dsh-trio · 浏览器 — 会话与标签页管理(多 profile、userDataDir 持久化、下载记录、访问历史)
 import type { Browser, BrowserContext, Page } from "playwright-core";
-import type { BrowserConfig, ProfileState, DownloadEntry, FormField } from "./types.js";
+import type { BrowserConfig, ProfileState, DownloadEntry, FormField, NavEntry } from "./types.js";
 
 /** 当前活动 profile 名(默认 "default")。 */
 export let currentProfile = "default";
@@ -8,6 +8,8 @@ export let currentProfile = "default";
 export const profileStates = new Map<string, ProfileState>();
 /** 最近下载记录 [{ download, suggestedFilename, at }](按 profile 名隔离)。 */
 const downloadsByProfile = new Map<string, DownloadEntry[]>();
+/** 页面访问历史(按 profile 名隔离)。不随 closeBrowser 清空,DSH 重启才重置。 */
+const historyByProfile = new Map<string, NavEntry[]>();
 /** 已保存的表单回放:name → fields 数组。 */
 export const savedForms = new Map<string, FormField[]>();
 /** 最近一次 browser_form 填充的字段(供 browser_form_save 无参保存)。 */
@@ -41,12 +43,55 @@ export function downloadsOf(name: string): DownloadEntry[] {
   return list;
 }
 
+/** 某 profile 的访问历史(按时间先后)。 */
+export function historyOf(name: string): NavEntry[] {
+  let list = historyByProfile.get(name);
+  if (list === undefined) {
+    list = [];
+    historyByProfile.set(name, list);
+  }
+  return list;
+}
+
+/** 把一次主 frame 导航记入该 profile 的访问历史(去重 + 上限 50 条)。 */
+function recordNav(profile: string, url: string): NavEntry {
+  const list = historyOf(profile);
+  const last = list[list.length - 1];
+  if (last !== undefined && last.url === url) {
+    last.ts = Date.now(); // 同 URL 重载:刷新时间戳
+    return last;
+  }
+  const entry: NavEntry = { url, title: "", ts: Date.now() };
+  list.push(entry);
+  if (list.length > 50) list.shift();
+  return entry;
+}
+
 export function attachPage(page: Page, config: BrowserConfig): void {
   page.setDefaultTimeout(config.timeoutMs ?? 30000);
   page.on("download", (download) => {
     const list = downloadsOf(currentProfile);
     list.push({ download, suggestedFilename: download.suggestedFilename(), at: Date.now() });
     if (list.length > 20) list.shift();
+  });
+  // 访问历史:记录主 frame 导航,load 后异步补齐标题。
+  const profile = currentProfile;
+  page.on("framenavigated", (frame) => {
+    if (frame !== page.mainFrame()) return;
+    const url = frame.url();
+    if (!url || url === "about:blank") return;
+    recordNav(profile, url);
+  });
+  page.on("load", () => {
+    const list = historyOf(profile);
+    const entry = list[list.length - 1];
+    if (entry === undefined) return;
+    page
+      .title()
+      .then((t) => {
+        if (t) entry.title = t;
+      })
+      .catch(() => {});
   });
 }
 

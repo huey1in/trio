@@ -38,7 +38,13 @@ export interface DownloadEntry {
   at: number;
 }
 
-/** 表单字段(selector 或 label 二选一)。 */
+/** 一次页面访问(导航)的记录,供实时画面模态框展示访问历史。 */
+export interface NavEntry {
+  url: string;
+  title: string;
+  ts: number;
+}
+
 /** 表单字段(selector 或 label 二选一)。 */
 export interface FormField {
   selector?: string;

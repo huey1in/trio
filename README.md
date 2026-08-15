@@ -22,7 +22,7 @@ dsh plugin --profile web add dsh-trio
 
 | 模块 | 做什么 | 端点/工具 |
 | --- | --- | --- |
-| 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面 | `browser_*` 工具 × 21 + 实时画面页 |
+| 🧭 **浏览器自动化** | 多配置文件(工作/个人隔离)+ 多标签 + 下载/上传 + Cookie 持久化 + 表单填充与**回放**,人可旁观实时画面(缩略图 + 大屏模态框 + **访问历史**) | `browser_*` 工具 × 21 |
 | 🔌 **MCP Server** | 会话/agent 反向暴露,长任务流式输出 + 进度,resources,**OAuth 2.0 鉴权** | `http://127.0.0.1:3080/trio/mcp` |
 | 🐙 **GitHub 集成** | issue/PR 全流程 + webhook 自动评审(去重)+ issue 自动修复闭环 + **事件看板** | `github_*` 工具 × 13 + webhook |
 | 🦊 **GitLab 集成** | 项目/issue/MR(含行内评论)+ **webhook 自动 MR 评审** | `gitlab_*` 工具 × 7 + webhook |
@@ -91,12 +91,9 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
 ```
 | `browser_wait` / `browser_back` / `browser_reload` / `browser_status` / `browser_close` | 其余控制 |
 
-**实时画面**:浏览器打开时访问 `http://127.0.0.1:3080/trio/browser`,每 2 秒自动
-刷新截图,看着 agent 操作你的浏览器。
-
-```sh
-# 换个端口的话就是 http://127.0.0.1:<你 dsh web 的端口>/trio/browser
-```
+**实时画面**:浏览器打开时,DSH 界面右下角面板会出现页面缩略图,**点击缩略图
+弹出大屏模态框**——实时画面每 2 秒刷新,下方列出**访问历史**(最近 50 条,
+点击可在新标签打开)。看着 agent 操作你的浏览器。
 
 > 首次调用浏览器工具时会自动启动浏览器;启动失败会提示你安装 Chromium
 > (`npx playwright install chromium`)或配置 `executablePath`。
@@ -113,7 +110,7 @@ msedge → chrome → chromium,也可 `executablePath` 指定):
     headless: true
     screenshotDir: .dsh-trio/screenshots
     downloadDir: .dsh-trio/downloads
-    liveViewPath: /trio/browser
+    liveViewPath: /trio/browser   # 面板实时画面数据 API 的挂载路径(不是页面)
     maxTextChars: 20000
     maxLinks: 50
     timeoutMs: 30000

@@ -33,6 +33,7 @@ function embedJs(base: string): string {
 
   // —— 挂载(等 body 就绪) ——
   var root = null, btn = null, panel = null, open = false, shot = null, eventsBox = null;
+  var modal = null, mTitle = null, mShot = null, mHistory = null, mEmpty = null, modalOpen = false;
   function css() {
     var s = document.createElement("style");
     s.textContent = [
@@ -49,17 +50,30 @@ function embedJs(base: string): string {
       ".trio-dot.bad{background:var(--dsw-alias-state-error-primary)}",
       ".trio-label{flex:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
       ".trio-value{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}",
-      ".trio-shot{width:100%;display:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}",
+      ".trio-shot{width:100%;display:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);cursor:pointer}",
       ".trio-shot.on{display:block}",
-      ".trio-actions{display:flex;gap:8px;padding-top:4px}",
-      ".trio-link{flex:1;height:28px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1.5;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none}",
-      ".trio-link:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
       ".trio-events{display:none;border-top:1px solid var(--dsw-alias-border-l2);padding-top:8px}",
       ".trio-events.on{display:block}",
       ".trio-events-title{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5;margin-bottom:4px}",
       ".trio-event{display:flex;gap:6px;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
       ".trio-event .ok{color:var(--dsw-alias-state-success-primary);flex:none}",
       ".trio-event .miss{color:var(--dsw-alias-state-error-primary);flex:none}",
+      ".trio-modal{position:fixed;inset:0;z-index:2147483001;display:none;align-items:center;justify-content:center;padding:24px;background:var(--dsw-alias-bg-mask-2)}",
+      ".trio-modal.open{display:flex}",
+      ".trio-modal-box{width:min(1200px,100%);max-height:90vh;display:flex;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-specific-menu);padding:12px;box-shadow:0 16px 64px var(--dsw-alias-bg-mask-2)}",
+      ".trio-modal-head{display:flex;align-items:center;gap:8px}",
+      ".trio-modal-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}",
+      ".trio-modal-close{width:28px;height:28px;flex:none;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:14px;line-height:1}",
+      ".trio-modal-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".trio-modal-shot{width:100%;max-height:58vh;object-fit:contain;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}",
+      ".trio-modal-empty{color:var(--dsw-alias-label-tertiary);font-size:12px;text-align:center;padding:24px 0}",
+      ".trio-history{display:none;flex-direction:column;gap:2px;max-height:24vh;overflow-y:auto;border-top:1px solid var(--dsw-alias-border-l2);padding-top:8px}",
+      ".trio-history.on{display:flex}",
+      ".trio-history-title{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1.5;margin-bottom:2px}",
+      ".trio-history a{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1.5;text-decoration:none;border-radius:6px;padding:2px 4px;white-space:nowrap;overflow:hidden}",
+      ".trio-history a:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
+      ".trio-history .t{color:var(--dsw-alias-label-tertiary);flex:none}",
+      ".trio-history .u{overflow:hidden;text-overflow:ellipsis}",
     ].join("\\n");
     document.head.appendChild(s);
   }
@@ -96,6 +110,76 @@ function embedJs(base: string): string {
       eventsBox.appendChild(line);
     }
   }
+  // —— 大屏模态框:点面板缩略图打开,2 秒轮询实时画面 + 访问历史 ——
+  function renderHistory(list) {
+    mHistory.innerHTML = "";
+    if (!list || list.length === 0) { mHistory.className = "trio-history"; return; }
+    mHistory.className = "trio-history on";
+    mHistory.appendChild(el("div", "trio-history-title", "访问历史(" + list.length + " 条,点击在新标签打开)"));
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var a = document.createElement("a");
+      a.href = e.url; a.target = "_blank"; a.rel = "noopener";
+      if (e.title) a.title = e.title;
+      a.appendChild(el("span", "t", fmtTime(e.ts)));
+      a.appendChild(el("span", "u", (e.title || e.url).slice(0, 100)));
+      mHistory.appendChild(a);
+    }
+  }
+  function modalRefresh() {
+    if (!modalOpen) return;
+    probe(B + "/status").then(function (b) {
+      if (!b.ok) {
+        mEmpty.style.display = "block"; mEmpty.textContent = "连接失败 (HTTP " + b.status + ")";
+        mShot.style.display = "none"; mTitle.textContent = "浏览器实时画面";
+        return;
+      }
+      var s = JSON.parse(b.body);
+      if (!s.open) {
+        mEmpty.style.display = "block"; mEmpty.textContent = "浏览器尚未打开。让 agent 调用 browser_open。";
+        mShot.style.display = "none"; mTitle.textContent = "浏览器实时画面";
+      } else {
+        mEmpty.style.display = "none"; mShot.style.display = "block";
+        mTitle.textContent = (s.url || "(空白页)") + " — " + (s.title || "");
+        mShot.src = B + "/screenshot?v=" + Date.now();
+      }
+    }).catch(function () {
+      mEmpty.style.display = "block"; mEmpty.textContent = "连接失败";
+      mShot.style.display = "none";
+    });
+    probe(B + "/history").then(function (h) {
+      if (h.ok) renderHistory(JSON.parse(h.body).history || []);
+    }).catch(function () {});
+    setTimeout(modalRefresh, 2000);
+  }
+  function openModal() {
+    if (modal === null) return;
+    modalOpen = true;
+    modal.className = "trio-modal open";
+    modalRefresh();
+  }
+  function closeModal() {
+    modalOpen = false;
+    if (modal !== null) modal.className = "trio-modal";
+  }
+  function buildModal() {
+    modal = el("div", "trio-modal");
+    var box = el("div", "trio-modal-box");
+    var head = el("div", "trio-modal-head");
+    mTitle = el("span", "trio-modal-title", "浏览器实时画面");
+    head.appendChild(mTitle);
+    var close = el("button", "trio-modal-close", "✕");
+    close.addEventListener("click", closeModal);
+    head.appendChild(close);
+    mEmpty = el("div", "trio-modal-empty", "浏览器尚未打开");
+    mShot = el("img", "trio-modal-shot"); mShot.alt = "browser"; mShot.style.display = "none";
+    mHistory = el("div", "trio-history");
+    box.appendChild(head); box.appendChild(mEmpty); box.appendChild(mShot); box.appendChild(mHistory);
+    modal.appendChild(box);
+    modal.addEventListener("click", function (ev) { if (ev.target === modal) closeModal(); });
+    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closeModal(); });
+    root.appendChild(modal);
+  }
   function mount() {
     if (root !== null) return;
     css();
@@ -108,16 +192,15 @@ function embedJs(base: string): string {
     function row(id) { var r = el("div", "trio-row"); var d = el("span", "trio-dot"); r.appendChild(d); var l = el("span", "trio-label", id); r.appendChild(l); var v = el("span", "trio-value", "—"); r.appendChild(v); return { row: r, dot: d, value: v }; }
     var rB = row("浏览器"), rM = row("MCP"), rG = row("GitHub");
     shot = el("img", "trio-shot"); shot.alt = "browser";
+    shot.addEventListener("click", openModal); // 点缩略图 → 大屏模态框
     eventsBox = el("div", "trio-events");
-    var actions = el("div", "trio-actions");
-    var aShot = el("a", "trio-link", "实时画面 ↗"); aShot.href = B; aShot.target = "_blank";
-    actions.appendChild(aShot);
     panel.appendChild(rB.row); panel.appendChild(rM.row); panel.appendChild(rG.row);
-    panel.appendChild(shot); panel.appendChild(eventsBox); panel.appendChild(actions);
+    panel.appendChild(shot); panel.appendChild(eventsBox);
     btn.addEventListener("click", function () { open = !open; panel.className = open ? "open" : ""; panel.id = "dsh-trio-panel"; });
     root = document.createElement("div");
     root.appendChild(btn); root.appendChild(panel);
     document.body.appendChild(root);
+    buildModal();
     function refresh() {
       probe(B + "/status").then(function (b) {
         if (b.ok) { var s = JSON.parse(b.body); rB.dot.className = "trio-dot " + (s.open ? "ok" : "bad"); rB.value.textContent = s.open ? (s.tabs + " 标签 · " + (s.url || "").slice(0, 24)) : "未打开"; }
