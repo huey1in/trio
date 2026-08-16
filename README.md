@@ -14,7 +14,6 @@
 <p align="center">
   <a href="https://github.com/huey1in/reef"><img src="https://img.shields.io/github/stars/huey1in/reef" alt="GitHub stars"></a>
   <a href="https://github.com/huey1in/reef/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/huey1in/reef/ci.yml?label=CI" alt="CI"></a>
-  <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX%20DO-社区-f0b752?style=flat-square" alt="LINUX DO"></a>
 </p>
 
 ---
